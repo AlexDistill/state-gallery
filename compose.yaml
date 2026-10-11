@@ -1,0 +1,14 @@
+services:
+  gallery:
+    build: .
+    ports:
+      - "127.0.0.1:4199:4199"
+    volumes:
+      - gallery-data:/data
+    environment:
+      STATE_GALLERY_ORIGIN: ${STATE_GALLERY_ORIGIN:-http://localhost:4199}
+      STATE_GALLERY_OWNER_SECRET: ${STATE_GALLERY_OWNER_SECRET:-}
+      STATE_GALLERY_HOSTED: ${STATE_GALLERY_HOSTED:-false}
+    restart: unless-stopped
+volumes:
+  gallery-data:

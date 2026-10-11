@@ -1,0 +1,7 @@
+docs/plans/
+docs/reviews/
+package-lock.json
+.data/
+.evidence/
+public/
+dist/

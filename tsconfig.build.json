@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/server",
+    "src/shared",
+    "src/cli",
+    "src/capture",
+    "src/importers"
+  ],
+  "compilerOptions": { "rootDir": "src", "declaration": true }
+}

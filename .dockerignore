@@ -1,0 +1,9 @@
+.git
+node_modules
+.data
+.env
+.evidence
+public
+dist
+test-results
+playwright-report
