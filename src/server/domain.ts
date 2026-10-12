@@ -145,8 +145,9 @@ export class Store {
         throw new Fault(400, "Responses require a revision request");
       const steps = m.steps.map((s) => {
         if (!s.image) return s;
+        if (!Object.hasOwn(assets, s.image))
+          throw new Fault(400, `Missing asset: ${s.image}`);
         const a = assets[s.image];
-        if (!a) throw new Fault(400, `Missing asset: ${s.image}`);
         const bytes = Buffer.isBuffer(a) ? a : a.bytes;
         const assetId = digest(id + digest(bytes));
         if (Buffer.isBuffer(a))
@@ -164,7 +165,7 @@ export class Store {
       };
       j.versions.push(v);
       j.currentId = v.id;
-      j.submissions[key] = { hash, id: v.id };
+      j.submissions = { ...j.submissions, [key]: { hash, id: v.id } };
       if (m.requestId)
         j.requests.find((q) => q.id === m.requestId)!.successorId = v.id;
       this.changed(j);

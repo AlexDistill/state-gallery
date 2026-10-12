@@ -1,4 +1,4 @@
-import type { Page, TestInfo } from "@playwright/test";
+import type { Page } from "playwright-core";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { manifestSchema, type Manifest } from "../shared/schema.js";
@@ -12,6 +12,12 @@ export interface CaptureStep {
   check?: (page: Page) => Promise<void>;
   fullPage?: boolean;
 }
+export interface CaptureAttachments {
+  attach(
+    name: string,
+    options: { body: Buffer; contentType: string },
+  ): Promise<void>;
+}
 export async function captureJourney(
   page: Page,
   options: {
@@ -19,7 +25,7 @@ export async function captureJourney(
     directory: string;
     steps: CaptureStep[];
     selected?: string[];
-    testInfo?: Pick<TestInfo, "attach">;
+    testInfo?: CaptureAttachments;
   },
 ): Promise<Manifest> {
   const expected = options.steps.map((s) => s.id);

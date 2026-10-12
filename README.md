@@ -41,14 +41,18 @@ Request revision explicitly. Comments alone never execute an agent. Export the r
 
 ## Integrate a project
 
-See [capture and gallery imports](docs/capture.md), [agent CLI/API integration](docs/agent-integration.md), and [self-hosting](docs/self-hosting.md).
+Install directly from GitHub in your app:
 
 ```sh
-node dist/cli/index.js help
-node dist/cli/index.js validate ./captures/manifest.json
+npm install --save-dev github:AlexDistill/state-gallery playwright
+npx playwright install chromium
+npx state-gallery init
+STATE_GALLERY_APP_URL=http://localhost:3000 node state-gallery.capture.mjs
 ```
 
-The package is intentionally scoped as `@state-gallery/review`; no registry availability or publication is claimed. Build and install `npm pack` output locally to use the `state-gallery` executable and `@state-gallery/review/capture` module outside this repository.
+Run `npx state-gallery serve` in another terminal to open a local review studio. Use the CLI to create/import journeys, or the typed Node client to submit them from a project script. Your existing Playwright Page remains under your app's control; ordinary Playwright and Playwright Test are both supported.
+
+See the [integration walkthrough](docs/integration.md), [capture and gallery imports](docs/capture.md), [agent CLI/API integration](docs/agent-integration.md), and [self-hosting](docs/self-hosting.md). Git installation builds the package automatically; `npm pack` produces a built tarball for offline/local installation. The package is named `@state-gallery/review`; npm registry publication is not claimed.
 
 ## Verify and contribute
 

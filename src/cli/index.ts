@@ -1,13 +1,82 @@
 #!/usr/bin/env node
 import { writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
+import { homedir } from "node:os";
 import { Client, loadManifest } from "./client.js";
 import { importContentFactory, importSigma } from "../importers/index.js";
+import { createCaptureStarter } from "./init.js";
 const [command, ...args] = process.argv.slice(2);
+const commands: Record<string, { usage: string; min: number; max: number }> = {
+  serve: { usage: "serve", min: 0, max: 0 },
+  init: { usage: "init [directory]", min: 0, max: 1 },
+  journeys: { usage: "journeys", min: 0, max: 0 },
+  create: { usage: "create <title>", min: 1, max: 1 },
+  validate: { usage: "validate <manifest>", min: 1, max: 1 },
+  import: {
+    usage: "import <journey> <manifest> <submission-key>",
+    min: 3,
+    max: 3,
+  },
+  submit: {
+    usage: "submit <journey> <manifest> <submission-key>",
+    min: 3,
+    max: 3,
+  },
+  export: {
+    usage: "export <journey> <request-id> <directory>",
+    min: 3,
+    max: 3,
+  },
+  "build-brief": { usage: "build-brief <journey>", min: 1, max: 1 },
+  "adapt-content-factory": {
+    usage:
+      "adapt-content-factory <gallery-directory> <output-manifest> [key-prefix]",
+    min: 2,
+    max: 3,
+  },
+  "adapt-sigma": {
+    usage: "adapt-sigma <gallery-directory> <output-manifest> [key-prefix]",
+    min: 2,
+    max: 3,
+  },
+};
 async function main() {
-  if (command === "help" || !command) {
+  if (
+    command === "help" ||
+    command === "--help" ||
+    command === "-h" ||
+    !command
+  ) {
     console.log(
-      "State Gallery\nvalidate <manifest>\nimport <journey> <manifest> <submission-key>\nsubmit <journey> <manifest> <submission-key>\nexport <journey> <request-id> <directory>\nbuild-brief <journey>\nadapt-content-factory <gallery-directory> <output-manifest> [key-prefix]\nadapt-sigma <gallery-directory> <output-manifest> [key-prefix]\nCredentials: STATE_GALLERY_URL, STATE_GALLERY_TOKEN (agent) or STATE_GALLERY_OWNER_SECRET (owner). Never put credentials in arguments.",
+      `State Gallery\n${Object.values(commands)
+        .map((c) => c.usage)
+        .join(
+          "\n",
+        )}\nCredentials: STATE_GALLERY_URL, STATE_GALLERY_TOKEN (agent) or STATE_GALLERY_OWNER_SECRET (owner). Never put credentials in arguments.`,
+    );
+    return;
+  }
+  const definition = commands[command];
+  if (!definition) throw new Error("Unknown command. Run state-gallery help.");
+  if (args.includes("--help") || args.includes("-h")) {
+    console.log(`Usage: state-gallery ${definition.usage}`);
+    return;
+  }
+  if (args.length < definition.min || args.length > definition.max)
+    throw new Error(`Usage: state-gallery ${definition.usage}`);
+  if (command === "serve") {
+    process.env.STATE_GALLERY_DATA ??= join(
+      homedir(),
+      ".state-gallery",
+      "data",
+    );
+    await import("../server/index.js");
+    return;
+  }
+  if (command === "init") {
+    console.log(await createCaptureStarter(resolve(args[0] ?? ".")));
+    console.log(
+      "Run node state-gallery.capture.mjs from your app after installing playwright. Set STATE_GALLERY_APP_URL to its URL.",
     );
     return;
   }
@@ -43,29 +112,23 @@ async function main() {
     console.log(file);
     return;
   }
-  const c = new Client(
-    process.env.STATE_GALLERY_URL ?? "http://localhost:4199",
-    process.env.STATE_GALLERY_TOKEN,
-    process.env.STATE_GALLERY_OWNER_SECRET,
-  );
+  const c = Client.fromEnvironment();
+  if (command === "create") {
+    console.log(JSON.stringify(await c.createJourney(args[0]), null, 2));
+    return;
+  }
+  if (command === "journeys") {
+    console.log(JSON.stringify(await c.listJourneys(), null, 2));
+    return;
+  }
   if (command === "export") {
     await c.exportRequest(args[0], args[1], resolve(args[2]));
     console.log(`Exported request to ${resolve(args[2])}`);
   } else if (command === "import" || command === "submit") {
-    const payload = await loadManifest(resolve(args[1]));
-    const v = await c.request(
-      `/journeys/${encodeURIComponent(args[0])}/versions`,
-      { ...payload, submissionKey: args[2] },
-    );
+    const v = await c.submitManifest(args[0], resolve(args[1]), args[2]);
     console.log(JSON.stringify({ versionId: v.id }));
   } else if (command === "build-brief") {
-    console.log(
-      JSON.stringify(
-        await c.request(`/journeys/${encodeURIComponent(args[0])}/build-brief`),
-        null,
-        2,
-      ),
-    );
+    console.log(JSON.stringify(await c.getBuildBrief(args[0]), null, 2));
   } else throw new Error("Unknown command. Run state-gallery help.");
 }
 main().catch((e) => {

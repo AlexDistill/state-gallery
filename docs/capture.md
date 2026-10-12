@@ -30,7 +30,7 @@ Raster images are decoded, limited to 10 MB / 40 megapixels / 20,000 pixels per 
 
 ## Playwright helper
 
-Install a packed State Gallery package and Playwright in your project. The helper accepts your existing Page; authentication, fixtures, readiness and navigation remain your responsibility. It settles document fonts and disables animations before capture. It does not discover states or run code in the review server.
+Install from GitHub or a packed State Gallery tarball and Playwright in your project. The helper accepts your existing Page from `playwright`, `playwright-core` or `@playwright/test`; authentication, fixtures, readiness and navigation remain your responsibility. It settles document fonts and disables animations before capture. It does not discover states or run code in the review server. The [integration walkthrough](integration.md) includes a generated starter and upload client.
 
 ```ts
 import { captureJourney } from "@state-gallery/review/capture";

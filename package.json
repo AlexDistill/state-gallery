@@ -1,6 +1,11 @@
 {
   "name": "@state-gallery/review",
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AlexDistill/state-gallery.git"
+  },
   "type": "module",
   "engines": {
     "node": ">=22.13"
@@ -9,16 +14,37 @@
     "state-gallery": "dist/cli/index.js"
   },
   "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/cli/client.d.ts",
+      "import": "./dist/cli/client.js",
+      "default": "./dist/cli/client.js"
+    },
+    "./manifest": {
+      "types": "./dist/shared/schema.d.ts",
+      "import": "./dist/shared/schema.js",
+      "default": "./dist/shared/schema.js"
+    },
     "./capture": "./dist/capture/playwright.js",
     "./importers": "./dist/importers/index.js"
   },
   "files": [
     "dist",
     "public",
+    "prepare.mjs",
+    "docs/integration.md",
+    "docs/capture.md",
+    "docs/agent-integration.md",
+    "docs/self-hosting.md",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
+    "prepare": "node prepare.mjs",
     "dev": "tsx src/server/index.ts",
     "start": "node dist/server/index.js",
     "typecheck": "tsc --noEmit",
@@ -50,10 +76,10 @@
     "vite": "7.3.7"
   },
   "peerDependencies": {
-    "@playwright/test": ">=1.55.1"
+    "playwright-core": ">=1.55.1"
   },
   "peerDependenciesMeta": {
-    "@playwright/test": {
+    "playwright-core": {
       "optional": true
     }
   }
