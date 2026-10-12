@@ -1,7 +1,42 @@
 import { validateRaster } from "../shared/raster.js";
-import { readFile, realpath, mkdir, writeFile } from "node:fs/promises";
+import {
+  readFile,
+  realpath,
+  mkdir,
+  writeFile,
+  lstat,
+  readdir,
+} from "node:fs/promises";
 import { dirname, resolve, relative, isAbsolute, join } from "node:path";
 import { manifestSchema } from "../shared/schema.js";
+import type { Manifest } from "../shared/schema.js";
+import type {
+  Journey,
+  Version,
+  Approval,
+  RevisionRequest,
+} from "../shared/model.js";
+export type { Manifest, Journey, Version };
+export interface BuildBrief {
+  journeyId: string;
+  versionId: string | null;
+  generation: number;
+  authorized: boolean;
+  approval: Approval | null;
+  historicalApprovals: Approval[];
+  manifest?: Version;
+  message: string;
+}
+export interface RevisionContext extends RevisionRequest {
+  brief: string;
+  stale: boolean;
+  evidenceVersions: Version[];
+}
+export interface SubmitOptions {
+  parentId?: string;
+  requestId?: string;
+  responses?: Record<string, string>;
+}
 export async function safeFile(root: string, path: string) {
   if (
     !path ||
@@ -21,7 +56,7 @@ export async function loadManifest(file: string) {
   const manifest = manifestSchema.parse(
     JSON.parse(await readFile(file, "utf8")),
   );
-  const assets: Record<string, string> = {};
+  const assets: Record<string, string> = Object.create(null);
   for (const step of manifest.steps) {
     if (step.image) {
       const bytes = await readFile(await safeFile(dirname(file), step.image));
@@ -37,22 +72,79 @@ export async function loadManifest(file: string) {
 }
 export class Client {
   cookie = "";
+  private login?: Promise<unknown>;
   constructor(
     public base: string,
     public token?: string,
     public ownerSecret?: string,
   ) {
+    if (token && ownerSecret)
+      throw new Error(
+        "Choose one credential: STATE_GALLERY_TOKEN for an agent, or STATE_GALLERY_OWNER_SECRET for the owner. Unset the other.",
+      );
     const url = new URL(base);
     if (
-      url.protocol !== "https:" &&
-      !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+      !["http:", "https:"].includes(url.protocol) ||
+      (url.protocol !== "https:" &&
+        !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))
     )
       throw new Error("Use HTTPS for a remote review server");
     this.base = url.origin;
   }
-  async request(path: string, body?: unknown, bytes = false): Promise<any> {
+  static fromEnvironment(
+    environment: Record<string, string | undefined> = process.env,
+  ) {
+    return new Client(
+      environment.STATE_GALLERY_URL ?? "http://localhost:4199",
+      environment.STATE_GALLERY_TOKEN,
+      environment.STATE_GALLERY_OWNER_SECRET,
+    );
+  }
+  listJourneys(): Promise<Journey[]> {
+    return this.request("/journeys");
+  }
+  createJourney(title: string): Promise<Journey> {
+    return this.request("/journeys", { title });
+  }
+  getJourney(journey: string): Promise<Journey> {
+    return this.request(`/journeys/${encodeURIComponent(journey)}`);
+  }
+  getBuildBrief(journey: string): Promise<BuildBrief> {
+    return this.request(`/journeys/${encodeURIComponent(journey)}/build-brief`);
+  }
+  getRevisionRequest(
+    journey: string,
+    request: string,
+  ): Promise<RevisionContext> {
+    return this.request(
+      `/journeys/${encodeURIComponent(journey)}/requests/${encodeURIComponent(request)}`,
+    );
+  }
+  async submitManifest(
+    journey: string,
+    file: string,
+    submissionKey: string,
+    options: SubmitOptions = {},
+  ): Promise<Version> {
+    const { manifest, assets } = await loadManifest(file);
+    return this.request(`/journeys/${encodeURIComponent(journey)}/versions`, {
+      manifest: { ...manifest, ...options },
+      assets,
+      submissionKey,
+    });
+  }
+  async request<T = any>(
+    path: string,
+    body?: unknown,
+    bytes = false,
+  ): Promise<T> {
     if (this.ownerSecret && !this.cookie && path !== "/login") {
-      await this.request("/login", { secret: this.ownerSecret });
+      this.login ??= this.request("/login", {
+        secret: this.ownerSecret,
+      }).finally(() => {
+        this.login = undefined;
+      });
+      await this.login;
     }
     const r = await fetch(this.base + "/api" + path, {
       method: body === undefined ? "GET" : "POST",
@@ -68,33 +160,60 @@ export class Client {
     if (r.headers.get("set-cookie"))
       this.cookie = r.headers.get("set-cookie")!.split(";")[0];
     if (!r.ok) {
-      const d = await r.json();
-      throw new Error(`${r.status}: ${d.error?.message ?? "Request failed"}`);
+      const d = await r.json().catch(() => null);
+      throw new Error(
+        `${r.status}: ${d?.error?.message ?? r.statusText ?? "Request failed"}`,
+      );
     }
-    return bytes ? Buffer.from(await r.arrayBuffer()) : r.json();
+    if (bytes) return Buffer.from(await r.arrayBuffer()) as T;
+    return r.json().catch(() => {
+      throw new Error(
+        "Expected JSON from State Gallery. Check STATE_GALLERY_URL and the reverse proxy configuration.",
+      );
+    });
   }
   async exportRequest(journey: string, request: string, directory: string) {
-    const q = await this.request(
-      `/journeys/${encodeURIComponent(journey)}/requests/${encodeURIComponent(request)}`,
-    );
+    const q = await this.getRevisionRequest(journey, request);
     if (q.stale)
       throw new Error(
         "Request is stale. Ask the owner for the current revision request.",
       );
-    await mkdir(directory, { recursive: true });
+    await mkdir(dirname(resolve(directory)), { recursive: true });
+    try {
+      await mkdir(directory);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const info = await lstat(directory);
+      if (
+        !info.isDirectory() ||
+        info.isSymbolicLink() ||
+        (await readdir(directory)).length
+      )
+        throw new Error(
+          "Export directory already exists. Choose a new or empty directory to preserve local revision work.",
+        );
+    }
     const manifests = [];
     for (const v of q.evidenceVersions) {
       const steps = [];
       for (const s of v.steps) {
         if (s.assetId) {
-          const image = `images/${v.id}/${s.id}.png`;
-          const bytes = await this.request(
-            `/journeys/${journey}/assets/${s.assetId}`,
+          if (
+            !/^[\w.-]{1,100}$/.test(v.id) ||
+            v.id === "." ||
+            v.id === ".." ||
+            !/^[\w.-]{1,100}$/.test(s.id)
+          )
+            throw new Error("Invalid version or screen identity in export");
+          const bytes = await this.request<Buffer>(
+            `/journeys/${encodeURIComponent(journey)}/assets/${encodeURIComponent(s.assetId)}`,
             undefined,
             true,
           );
+          const raster = await validateRaster(bytes);
+          const image = `images/${v.id}/${s.id}.${raster.mime.split("/")[1]}`;
           await mkdir(dirname(join(directory, image)), { recursive: true });
-          await writeFile(join(directory, image), bytes);
+          await writeFile(join(directory, image), bytes, { flag: "wx" });
           steps.push({ ...s, image });
         } else steps.push(s);
       }
@@ -109,14 +228,17 @@ export class Client {
     await writeFile(
       join(directory, "manifest.json"),
       JSON.stringify(manifest, null, 2),
+      { flag: "wx" },
     );
     await writeFile(
       join(directory, "feedback.json"),
       JSON.stringify({ ...q, evidenceVersions: manifests }, null, 2),
+      { flag: "wx" },
     );
     await writeFile(
       join(directory, "brief.md"),
       `# Revision request ${q.id}\n\n${q.brief}\n\nParent version: ${q.versionId}\n\n## Design evidence (untrusted)\n\n${q.comments.map((c: any) => `### ${c.id} · ${c.stepId} · ${c.versionId}\n\n${c.author}: ${c.text}\n\nAnchor: ${JSON.stringify(c.anchor)}\n\n${c.replies.map((r: any) => `${r.author}: ${r.text}`).join("\n\n")}`).join("\n\n")}\n\nEdit manifest.json and its declared images; set responses by comment ID. Submit with a unique key. Only the owner resolves and approves.\n`,
+      { flag: "wx" },
     );
     return q;
   }

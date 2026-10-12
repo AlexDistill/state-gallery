@@ -1,6 +1,32 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Store } from "../src/server/domain.js";
+test("submission keys with special object names still replay after persistence", () => {
+  const store = new Store(":memory:");
+  try {
+    const journey = store.createJourney("Special key");
+    const manifest = {
+      schemaVersion: 1,
+      steps: [
+        {
+          id: "gap",
+          title: "Gap",
+          kind: "gap",
+          outcome: "missing",
+          viewport: { width: 100, height: 100 },
+        },
+      ],
+    };
+    const first = store.submit(journey.id, manifest, {}, "__proto__");
+    assert.equal(
+      store.submit(journey.id, manifest, {}, "__proto__").id,
+      first.id,
+    );
+    assert.equal(store.get(journey.id).versions.length, 1);
+  } finally {
+    store.close();
+  }
+});
 test("immutable mixed versions and stale approvals", () => {
   const s = new Store(":memory:");
   const j = s.createJourney("Checkout");

@@ -6,6 +6,33 @@ import { join } from "node:path";
 import sharp from "sharp";
 import { importContentFactory, importSigma } from "../src/importers/index.js";
 import { loadManifest } from "../src/cli/client.js";
+test("a declared image named __proto__ survives the local upload dictionary", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sg-image-key-"));
+  const bytes = await sharp({
+    create: { width: 10, height: 10, channels: 3, background: "#eee" },
+  })
+    .png()
+    .toBuffer();
+  await writeFile(join(root, "__proto__"), bytes);
+  await writeFile(
+    join(root, "manifest.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      steps: [
+        {
+          id: "first",
+          title: "First",
+          kind: "mockup",
+          viewport: { width: 10, height: 10 },
+          image: "__proto__",
+        },
+      ],
+    }),
+  );
+  const payload = await loadManifest(join(root, "manifest.json"));
+  assert.ok(Object.hasOwn(payload.assets, "__proto__"));
+  assert.equal(payload.assets["__proto__"], bytes.toString("base64"));
+});
 test("observed formats preserve identity, unknown coverage and missing inventory", async () => {
   const root = await mkdtemp(join(tmpdir(), "sg-import-"));
   const image = await sharp({

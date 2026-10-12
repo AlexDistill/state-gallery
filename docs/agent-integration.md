@@ -34,6 +34,8 @@ Edit the manifest and declared images, preserve stable step IDs when the screen 
 
 Keep the same submission key and payload when recovering a lost response. Identical replay returns the original version ID; changing the payload with that key conflicts. A superseded request or non-current parent returns a 409 with recovery instructions. Export the latest owner request before doing more work. The export command refuses stale requests.
 
+Export into a new or empty directory. Existing revision files are preserved; use a new pass directory when exporting again. Image extensions match their actual PNG/JPEG/WebP bytes.
+
 The build brief contains exact current version/generation, `authorized`, current approval, and historical approvals. Check it immediately before building. New comments/replies, versions or requests invalidate current authorization. An agent cannot issue approval.
 
 ## HTTP boundary
@@ -47,3 +49,5 @@ The CLI uses the same validated endpoints as the browser. JSON errors have `{ "e
 - `GET /api/journeys/:id/build-brief` reads current authorization.
 
 Owner browser decisions use `/requests` or `/approve` with `{versionId,generation}`. Comments use `/comments` with `{versionId,stepId,text,anchor}`; the server derives author identity from the session. Owner resolutions use `/comments/:comment/resolve` with `{resolved,generation}`.
+
+For integration from a Node script, use the public `Client` and typed methods described in the [integration walkthrough](integration.md). Raw requests remain available for the same API; credentials retain their original role restrictions.

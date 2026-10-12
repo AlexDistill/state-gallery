@@ -1,5 +1,7 @@
 # First-release local verification
 
+For the subsequent integration/debugging round, see [the 0.2.0 verification receipt](reviews/2026-10-11-integration-debug.md).
+
 Implementation location: `/Users/alexryan/Documents/work/distill/state-gallery`, branch `codex/initial-release`. Canonical plan: `docs/plans/2026-10-11-1035-feat-shared-journey-review-plan.md`. All U1–U7 were implemented in the native worker context. The plan and its review receipt were not edited. No commits, PRs, publications or deployments were performed by this worker; the caller owns authoritative review, verification and shipping.
 
 ## Executed results

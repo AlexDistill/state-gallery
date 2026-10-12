@@ -82,6 +82,68 @@ test("role boundaries, origin and protected assets", async () => {
   }
 });
 import sharp from "sharp";
+test("image hashes include special filenames so changed retries conflict", async () => {
+  const store = new Store(":memory:");
+  const origin = "http://localhost:4199";
+  const server = createServer({
+    store,
+    secret: "fixture-owner",
+    origin,
+  }).listen(0);
+  try {
+    const base = `http://localhost:${(server.address() as { port: number }).port}`;
+    const login = await fetch(base + "/api/login", {
+      method: "POST",
+      headers: { Origin: origin, "Content-Type": "application/json" },
+      body: JSON.stringify({ secret: "fixture-owner" }),
+    });
+    const cookie = login.headers.get("set-cookie")!.split(";")[0];
+    const journey = store.createJourney("Special filename");
+    const manifest = {
+      schemaVersion: 1,
+      steps: [
+        {
+          id: "first",
+          title: "First",
+          kind: "mockup",
+          viewport: { width: 10, height: 10 },
+          image: "__proto__",
+        },
+      ],
+    };
+    for (const [color, status] of [
+      ["#eee", 201],
+      ["#ddd", 409],
+    ] as const) {
+      const bytes = await sharp({
+        create: { width: 10, height: 10, channels: 3, background: color },
+      })
+        .png()
+        .toBuffer();
+      const result = await fetch(
+        `${base}/api/journeys/${journey.id}/versions`,
+        {
+          method: "POST",
+          headers: {
+            Origin: origin,
+            Cookie: cookie,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            manifest,
+            assets: { ["__proto__"]: bytes.toString("base64") },
+            submissionKey: "same-key",
+          }),
+        },
+      );
+      assert.equal(result.status, status);
+    }
+    assert.equal(store.get(journey.id).versions.length, 1);
+  } finally {
+    server.close();
+    store.close();
+  }
+});
 test("expired and revoked sessions can sign out without bypassing origin checks", async () => {
   const store = new Store(":memory:");
   const origin = "http://localhost:4199";

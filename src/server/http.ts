@@ -241,7 +241,7 @@ export function createServer(o: ServerOptions) {
       Object.keys(raw).length > 2000
     )
       throw new Fault(400, "Invalid asset collection");
-    const assets: Record<string, Raster> = {};
+    const assets: Record<string, Raster> = Object.create(null);
     for (const [name, data] of Object.entries(raw)) {
       if (typeof data !== "string" || data.length > 14 * 1024 * 1024)
         throw new Fault(400, "Images must be under 10 MB each");
