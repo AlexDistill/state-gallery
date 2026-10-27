@@ -198,6 +198,25 @@ const mediaPath = (t: T, id: string) =>
   join(t.mediaDir, getMedia(t.store, id)!.path);
 
 test(
+  "a member cannot clear a confidential flag another member raised",
+  run(async (t) => {
+    assert.equal((await t.link(t.alex.token, true)).status, 200);
+    assert.equal((await t.link(t.amadeo.token, false)).status, 200);
+    let poll = await t.call(`/journeys/${t.j.id}`, { token: t.alex.token });
+    assert.equal(poll.body.confidential, true);
+    const p = await t.push(t.amadeo.token, {
+      notes: [await t.pushedNote(t.amadeo.token, "e-amadeo", ["a1"])],
+    });
+    assert.equal(p.status, 409);
+    assert.equal(listNotes(t.store, t.j.id).length, 0);
+
+    assert.equal((await t.link(t.alex.token, false)).status, 200);
+    poll = await t.call(`/journeys/${t.j.id}`, { token: t.alex.token });
+    assert.equal(poll.body.confidential, false);
+  }),
+);
+
+test(
   "recording is refused without a linked Loop or on a confidential link, then allowed",
   run(async (t) => {
     const media = await t.recording(t.alex.token);

@@ -179,7 +179,19 @@ export function link(
         "INSERT INTO loop_links VALUES(?,?,?,?,?) ON CONFLICT(member_id) DO UPDATE SET seed_id=excluded.seed_id, bed=excluded.bed",
       )
       .run(memberId, journey, l.seedId, l.bed, now);
-    setConfidential(store, journey, l.confidential, memberId, now);
+    // A member's seed may raise the flag, but only the member who raised it
+    // (or the owner, from the gallery) may clear it.
+    const current = db(store)
+      .prepare(
+        "SELECT confidential, changed_by FROM journey_sync WHERE journey=?",
+      )
+      .get(journey);
+    const heldByOther =
+      !!current &&
+      !!Number(current.confidential) &&
+      current.changed_by !== memberId;
+    if (l.confidential || !heldByOther)
+      setConfidential(store, journey, l.confidential, memberId, now);
     const g = store.markLinkedLoop(memberId, now)!;
     return {
       seedId: l.seedId,
@@ -521,7 +533,7 @@ export function push(
       results.push(r);
     };
     const open = () => {
-      if (linked.confidential)
+      if (linked.confidential || isConfidential(store, journey))
         throw new Fault(
           409,
           "This seed is confidential: a push can only carry decisions and retractions",
