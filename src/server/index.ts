@@ -32,8 +32,10 @@ const app = createServer({
   hosted,
   publicDir: fileURLToPath(new URL("../../public", import.meta.url)),
 });
-app.listen(port, process.env.HOST ?? "127.0.0.1", () =>
+const server = app.listen(port, process.env.HOST ?? "127.0.0.1", () =>
   console.log(
     `State Gallery: ${origin}\n${suppliedSecret ? "Owner credential supplied through environment." : `Owner secret: ${resolve(dir, "owner-secret")}`}`,
   ),
 );
+// Node ends a request after 5 minutes by default; a 500 MB recording on a slow uplink needs longer.
+server.requestTimeout = 30 * 60 * 1000;

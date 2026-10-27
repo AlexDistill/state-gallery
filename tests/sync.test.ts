@@ -788,3 +788,110 @@ test(
     assert.equal(listNotes(t.store, t.j.id).length, 2);
   }),
 );
+
+test(
+  "a pushed decision on a pin already in a revision request gets the standing decision and the rest of the push applies",
+  run(async (t) => {
+    await t.push(t.alex.token, {
+      notes: [await t.pushedNote(t.alex.token, "e1", ["p1"])],
+    });
+    const d = await t.call(`/journeys/${t.j.id}/pins/p1/decisions`, {
+      token: t.amadeo.token,
+      body: { expected: null, status: "approved" },
+    });
+    assert.equal(d.status, 201);
+    const j0 = t.store.get(t.j.id);
+    const q = await t.call(`/journeys/${t.j.id}/requests`, {
+      token: t.amadeo.token,
+      body: { versionId: j0.currentId, generation: j0.generation },
+    });
+    assert.equal(q.status, 201, JSON.stringify(q.body));
+    const r = await t.push(t.alex.token, {
+      decisions: [
+        { eventId: "d1", pinId: "p1", expected: null, status: "dropped" },
+      ],
+      shelf: [{ eventId: "s1", itemId: "x", reason: "later" }],
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.results[0].ok, false);
+    assert.equal(r.body.results[0].current.status, "approved");
+    assert.equal(r.body.results[0].current.memberName, "Amadeo");
+    assert.equal(isApplied(t.store, t.j.id, "s1"), true);
+    assert.equal(isApplied(t.store, t.j.id, "d1"), true);
+  }),
+);
+
+test(
+  "a pushed decision on a retracted note's pin is answered without blocking the rest of the push",
+  run(async (t) => {
+    const p = await t.push(t.alex.token, {
+      notes: [await t.pushedNote(t.alex.token, "e1", ["p1"])],
+    });
+    const noteId = p.body.results[0].noteId;
+    await t.push(t.alex.token, { retractions: [{ eventId: "r1", noteId }] });
+    const r = await t.push(t.amadeo.token, {
+      decisions: [
+        { eventId: "d1", pinId: "p1", expected: null, status: "approved" },
+      ],
+      shelf: [{ eventId: "s1", itemId: "x", reason: "later" }],
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.results[0].ok, false);
+    assert.equal(r.body.results[0].current, null);
+    assert.equal(isApplied(t.store, t.j.id, "s1"), true);
+  }),
+);
+
+test(
+  "a round answering a request still applies when a note it answered was retracted meanwhile",
+  run(async (t) => {
+    const p = await t.push(t.alex.token, {
+      notes: [
+        await t.pushedNote(t.alex.token, "e1", ["p1"]),
+        await t.pushedNote(t.alex.token, "e2", ["p2"]),
+      ],
+    });
+    const noteId = p.body.results[0].noteId;
+    await t.call(`/journeys/${t.j.id}/pins/p1/decisions`, {
+      token: t.amadeo.token,
+      body: { expected: null, status: "approved" },
+    });
+    const j0 = t.store.get(t.j.id);
+    const q = await t.call(`/journeys/${t.j.id}/requests`, {
+      token: t.amadeo.token,
+      body: { versionId: j0.currentId, generation: j0.generation },
+    });
+    assert.equal(q.status, 201, JSON.stringify(q.body));
+    await t.push(t.alex.token, { retractions: [{ eventId: "r1", noteId }] });
+    const image = await t.upload(
+      t.amadeo.token,
+      await png("#321"),
+      "image/png",
+    );
+    const round = (eventId: string, responses: Record<string, string>) => ({
+      eventId,
+      loopTurnId: `turn-${eventId}`,
+      parentIds: ["loop-v1"],
+      parentVersionId: j0.currentId,
+      requestId: q.body.id,
+      responses,
+      inputs: [{ title: "request" }],
+      outputs: [{ title: "home", kind: "image" }],
+      reactionNoteIds: [],
+      version: { steps: [step(image)] },
+    });
+    const outside = await t.push(t.amadeo.token, {
+      turns: [round("t0", { p1: "Made it bigger", p2: "Not asked for" })],
+    });
+    assert.equal(outside.status, 400, JSON.stringify(outside.body));
+    const r = await t.push(t.amadeo.token, {
+      turns: [round("t1", { p1: "Made the title bigger" })],
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const j = t.store.get(t.j.id);
+    const v = j.versions.at(-1)!;
+    assert.equal(r.body.results[0].versionId, v.id);
+    assert.deepEqual(v.responses, {});
+    assert.equal(j.requests.find((x) => x.id === q.body.id)!.successorId, v.id);
+  }),
+);

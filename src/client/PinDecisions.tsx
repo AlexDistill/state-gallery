@@ -15,7 +15,6 @@ export function stepPins(notes: VideoNote[]) {
   return notes.flatMap((note) => note.pins.map((pin) => ({ note, pin })));
 }
 
-/** Video notes on this step: each pin opens its quote, proposal, decision and history. */
 export function NotesPanel({
   journeyId,
   notes,

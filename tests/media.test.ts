@@ -294,3 +294,55 @@ test("a body without a length that runs past the cap is refused and leaves no fi
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a browser recording upload is refused while the project is confidential; Loop's and image uploads are not", async () => {
+  const t = await setup();
+  try {
+    const store = t.store;
+    const inv = store.inviteMember(t.journey.id, "Bea");
+    const redeemed = await fetch(
+      `http://localhost:${t.port}/api/members/redeem`,
+      {
+        method: "POST",
+        headers: { Origin: origin, "Content-Type": "application/json" },
+        body: JSON.stringify({ invite: inv.invite }),
+      },
+    );
+    assert.equal(redeemed.status, 200);
+    const cookie = redeemed.headers.get("set-cookie")!.split(";")[0];
+    const { memberToken: token } = (await redeemed.json()) as any;
+    const browser = (bytes: Buffer, mime: string) =>
+      fetch(`http://localhost:${t.port}/api/journeys/${t.journey.id}/media`, {
+        method: "PUT",
+        headers: { "Content-Type": mime, Origin: origin, Cookie: cookie },
+        body: new Uint8Array(bytes),
+      });
+    assert.equal((await browser(randomBytes(500), "audio/webm")).status, 201);
+    const link = await fetch(
+      `http://localhost:${t.port}/api/journeys/${t.journey.id}/link`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          seedId: "seed-1",
+          bed: "shared:team",
+          confidential: true,
+        }),
+      },
+    );
+    assert.equal(link.status, 200);
+    const refused = await browser(randomBytes(500), "audio/webm");
+    assert.equal(refused.status, 409);
+    assert.match(((await refused.json()) as any).error.message, /confidential/);
+    assert.equal(readdirSync(join(t.mediaDir, "tmp")).length, 0);
+    assert.equal(
+      (await t.upload(randomBytes(500), "audio/webm", token)).status,
+      201,
+    );
+  } finally {
+    t.close();
+  }
+});

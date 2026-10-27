@@ -129,7 +129,6 @@ type Preview = {
 };
 const TRACK_INTERVAL_MS = 50;
 
-/** Recording state and the pointer handlers the screen review wires to its image. */
 export function useRecorder() {
   const [phase, setPhase] = useState<Phase>("idle"),
     [pins, setPins] = useState<DraftPin[]>([]),
@@ -144,6 +143,7 @@ export function useRecorder() {
   const lastMove = useRef(-Infinity);
   const down = useRef<{ p: Point; t: number } | null>(null);
   const url = useRef("");
+  const mounted = useRef(true);
   const elapsed = () => Math.round(performance.now() - startedAt.current);
   const stopStreams = () => {
     for (const s of streams.current) for (const t of s.getTracks()) t.stop();
@@ -154,17 +154,18 @@ export function useRecorder() {
     url.current = "";
     setPreview(null);
   };
-  useEffect(
-    () => () => {
-      if (recorder.current?.state === "recording") {
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (recorder.current && recorder.current.state !== "inactive") {
         recorder.current.onstop = null;
         recorder.current.stop();
       }
       stopStreams();
       if (url.current) URL.revokeObjectURL(url.current);
-    },
-    [],
-  );
+    };
+  }, []);
   const start = async () => {
     setError("");
     clearPreview();
@@ -172,12 +173,14 @@ export function useRecorder() {
     try {
       const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
       streams.current = [mic];
+      if (!mounted.current) return stopStreams();
       let tracks: MediaStreamTrack[] = mic.getAudioTracks();
       if (screen) {
         const display = await navigator.mediaDevices.getDisplayMedia({
           video: true,
         });
         streams.current.push(display);
+        if (!mounted.current) return stopStreams();
         tracks = [...display.getVideoTracks(), ...tracks];
       }
       const mime = probeMime((t) => MediaRecorder.isTypeSupported(t), screen);
@@ -314,7 +317,6 @@ const clock = (ms: number) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
 
-/** Record control, live status and the pre-upload preview with pins on a timeline. */
 export function RecorderPanel({
   rec,
   journeyId,

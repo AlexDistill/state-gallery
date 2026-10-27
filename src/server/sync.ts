@@ -13,6 +13,7 @@ import {
 } from "./media.js";
 import {
   createNote,
+  closedPin,
   decidePin,
   feedSince,
   getNote,
@@ -412,7 +413,6 @@ const removeFiles = (dir: string, paths: string[]) => {
   for (const p of paths) rmSync(join(dir, p), { force: true });
 };
 
-/** Owner discards a recording whose recorder never processed it. */
 export function discardNote(
   store: Store,
   journey: string,
@@ -439,6 +439,31 @@ function openRequestFor(j: Journey, requestId: string) {
     q.id === j.requests.at(-1)?.id &&
     q.versionId === j.currentId &&
     !q.successorId
+  );
+}
+
+/**
+ * Drops responses to comments that are no longer anywhere in the journey: a retraction
+ * removes its pins from the open request while a round answering it may already be built.
+ * A response naming feedback that still exists outside the request is kept, so the
+ * request check still refuses it.
+ */
+function withoutRetracted(
+  store: Store,
+  j: Journey,
+  requestId: string | undefined,
+  responses: Record<string, string>,
+) {
+  const q = j.requests.find((q) => q.id === requestId);
+  const exists = (id: string) =>
+    !!q?.comments.some((c) => c.id === id) ||
+    !!q?.pins?.some((p) => p.pinId === id) ||
+    j.comments.some((c) => c.id === id) ||
+    !!db(store)
+      .prepare("SELECT 1 FROM pins WHERE id=? AND journey=?")
+      .get(id, j.id);
+  return Object.fromEntries(
+    Object.entries(responses).filter(([id]) => exists(id)),
   );
 }
 
@@ -497,7 +522,7 @@ function applyTurn(
           schemaVersion: 1,
           parentId: t.parentVersionId ?? undefined,
           requestId: t.requestId,
-          responses: t.responses,
+          responses: withoutRetracted(store, j, t.requestId, t.responses),
         },
         assets,
         `loop-turn:${t.loopTurnId}`,
@@ -609,6 +634,8 @@ export function push(
       });
     for (const d of p.decisions)
       apply(d.eventId, "decision", () => {
+        const closed = closedPin(store, journey, d.pinId);
+        if (closed) return { pinId: d.pinId, ok: false, ...closed };
         const r = decidePin(store, journey, d.pinId, d, actor, now);
         return r.ok
           ? { pinId: d.pinId, ok: true, decision: r.decision }
@@ -682,14 +709,13 @@ export function syncContent(
   },
 ) {
   const j = store.get(journey);
-  const notes = new Set(ids.notes);
   const has = (list: string[]) => {
     const s = new Set(list);
     return (x: { id: string }) => s.has(x.id);
   };
   return {
     notes: listNotes(store, journey)
-      .filter((n) => notes.has(n.id))
+      .filter(has(ids.notes))
       .map((n) => noteView(store, n, memberId, true)),
     turns: listTurns(store, journey).filter(has(ids.turns)),
     shelf: listShelf(store, journey).filter(has(ids.shelf)),

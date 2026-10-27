@@ -115,7 +115,7 @@ export interface RequestPin {
   atMs: number;
   quote: string | null;
   proposal: string | null;
-  status: "approved" | "changed";
+  status: Exclude<PinDecisionStatus, "dropped">;
   text: string;
   decisionId: string;
   decidedBy: { memberId: string | null; name: string };

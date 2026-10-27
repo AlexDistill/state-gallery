@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import sharp from "sharp";
 import { BASE, asMember, joinAndOpenStep, sharedJourney } from "./members.js";
 
 /** Records for about three seconds, clicking the image at each fraction given. */
@@ -117,4 +118,79 @@ test("on a confidential link the Record control is absent", async ({
   await expect(
     page.getByText("Recordings here go to the shared project."),
   ).toHaveCount(0);
+});
+
+test("a new version arriving while recording keeps the take on the version it was recorded on", async ({
+  page,
+}) => {
+  const { owner, journey, versionId } = await sharedJourney(
+    "New version mid-take",
+  );
+  const alex = await joinAndOpenStep(page, owner, journey, "Alex", true);
+  await page.getByRole("button", { name: "Record note" }).click();
+  await expect(page.getByText(/Recording ·/)).toBeVisible();
+  const img = page.locator(".annotated img");
+  const box = (await img.boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  const png = await sharp({
+    create: { width: 600, height: 400, channels: 3, background: "#cad7e2" },
+  })
+    .png()
+    .toBuffer();
+  await owner.request(`/journeys/${journey}/versions`, {
+    manifest: {
+      schemaVersion: 1,
+      parentId: versionId,
+      steps: [
+        {
+          id: "home",
+          title: "Home",
+          kind: "mockup",
+          viewport: { width: 600, height: 400 },
+          image: "home.png",
+        },
+      ],
+    },
+    assets: { "home.png": png.toString("base64") },
+    submissionKey: "mid-take-v2",
+  });
+  // The journey poll runs every 4 seconds.
+  await page.waitForTimeout(5000);
+  await page.getByRole("button", { name: "Stop" }).click();
+  await expect(
+    page.getByRole("button", { name: /^Comment 1 at / }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  await expect(page.getByText("Waiting for Alex's Loop").first()).toBeVisible();
+  const { body } = await asMember(alex.token, `/journeys/${journey}/notes`);
+  expect(body.notes).toHaveLength(1);
+  expect(body.notes[0].versionId).toBe(versionId);
+});
+
+test("leaving the screen while the microphone is being opened leaves it closed", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const real = navigator.mediaDevices.getUserMedia.bind(
+      navigator.mediaDevices,
+    );
+    navigator.mediaDevices.getUserMedia = async (c) => {
+      const s = await real(c);
+      (window as any).__mic = s;
+      await new Promise((r) => setTimeout(r, 1500));
+      return s;
+    };
+  });
+  const { owner, journey } = await sharedJourney("Leave while starting");
+  await joinAndOpenStep(page, owner, journey, "Alex", true);
+  await page.getByRole("button", { name: "Record note" }).click();
+  await page.getByRole("button", { name: "Rounds" }).click();
+  await page.waitForTimeout(2500);
+  expect(
+    await page.evaluate(() =>
+      (window as any).__mic
+        .getTracks()
+        .every((t: MediaStreamTrack) => t.readyState === "ended"),
+    ),
+  ).toBe(true);
 });

@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import type { DatabaseSync } from "node:sqlite";
 import { Fault, type Store } from "./domain.js";
 import {
   noteInputSchema,
@@ -44,7 +43,6 @@ CREATE TABLE IF NOT EXISTS applied_events(journey TEXT NOT NULL,event_id TEXT NO
 `;
 
 type Row = Record<string, unknown>;
-const db = (s: Store): DatabaseSync => s.db;
 const num = (v: unknown) => Number(v);
 const strOrNull = (v: unknown) => (v == null ? null : String(v));
 
@@ -80,9 +78,9 @@ function insertPin(
   noteId: string,
   pin: { id: string; anchor: Anchor; atMs: number },
 ) {
-  if (db(store).prepare("SELECT 1 FROM pins WHERE id=?").get(pin.id))
+  if (store.db.prepare("SELECT 1 FROM pins WHERE id=?").get(pin.id))
     throw new Fault(409, `Comment id already used: ${pin.id}`);
-  db(store)
+  store.db
     .prepare(
       "INSERT INTO pins(id,note_id,journey,anchor,at_ms) VALUES(?,?,?,?,?)",
     )
@@ -98,14 +96,14 @@ export function appendFeed(
   now = Date.now(),
 ) {
   const seq = latestSeq(store, journey) + 1;
-  db(store)
+  store.db
     .prepare("INSERT INTO sync_feed VALUES(?,?,?,?,?)")
     .run(journey, seq, kind, JSON.stringify(ids), now);
   return seq;
 }
 
 export function latestSeq(store: Store, journey: string): number {
-  const r = db(store)
+  const r = store.db
     .prepare("SELECT MAX(seq) AS seq FROM sync_feed WHERE journey=?")
     .get(journey);
   return r?.seq == null ? 0 : num(r.seq);
@@ -117,7 +115,7 @@ export function feedSince(
   after: number,
   limit = 500,
 ): FeedEvent[] {
-  return db(store)
+  return store.db
     .prepare(
       "SELECT * FROM sync_feed WHERE journey=? AND seq>? ORDER BY seq LIMIT ?",
     )
@@ -139,7 +137,7 @@ export function markApplied(
 ) {
   return (
     Number(
-      db(store)
+      store.db
         .prepare("INSERT OR IGNORE INTO applied_events VALUES(?,?,?)")
         .run(journey, eventId, now).changes,
     ) > 0
@@ -147,7 +145,7 @@ export function markApplied(
 }
 
 export function isApplied(store: Store, journey: string, eventId: string) {
-  return !!db(store)
+  return !!store.db
     .prepare("SELECT 1 FROM applied_events WHERE journey=? AND event_id=?")
     .get(journey, eventId);
 }
@@ -165,7 +163,7 @@ const decisionRow = (r: Row): PinDecision => ({
 });
 
 function currentDecision(store: Store, pinId: string): PinDecision | null {
-  const r = db(store)
+  const r = store.db
     .prepare("SELECT * FROM pin_decisions WHERE pin_id=? AND superseded=0")
     .get(pinId);
   return r ? decisionRow(r) : null;
@@ -173,14 +171,14 @@ function currentDecision(store: Store, pinId: string): PinDecision | null {
 
 /** Every decision on a pin, oldest first, including superseded and refused ones. */
 export function pinHistory(store: Store, pinId: string): PinDecision[] {
-  return db(store)
+  return store.db
     .prepare("SELECT * FROM pin_decisions WHERE pin_id=? ORDER BY n")
     .all(pinId)
     .map(decisionRow);
 }
 
 function pinsOf(store: Store, noteId: string): Pin[] {
-  return db(store)
+  return store.db
     .prepare(
       "SELECT p.*, q.quote, q.proposal FROM pins p LEFT JOIN pin_proposals q ON q.pin_id=p.id WHERE p.note_id=? ORDER BY p.at_ms, p.id",
     )
@@ -218,7 +216,7 @@ const noteRow = (store: Store, r: Row): VideoNote => ({
 
 /** A note with its pins, proposals and current decisions; a retracted note is a tombstone. */
 export function getNote(store: Store, journey: string, noteId: string) {
-  const r = db(store)
+  const r = store.db
     .prepare("SELECT * FROM video_notes WHERE id=? AND journey=?")
     .get(noteId, journey);
   if (!r) throw new Fault(404, "Note not found");
@@ -226,7 +224,7 @@ export function getNote(store: Store, journey: string, noteId: string) {
 }
 
 export function listNotes(store: Store, journey: string): VideoNote[] {
-  return db(store)
+  return store.db
     .prepare(
       "SELECT * FROM video_notes WHERE journey=? ORDER BY created_at, rowid",
     )
@@ -252,13 +250,13 @@ export function createNote(
     const step = stepOf(store.get(journey), input.versionId, input.stepId);
     for (const p of input.pins) checkAnchor(p.anchor, step);
     if (
-      db(store)
+      store.db
         .prepare("SELECT 1 FROM video_notes WHERE media_id=?")
         .get(input.mediaId)
     )
       throw new Fault(409, "This recording already belongs to another note");
     const id = randomUUID();
-    db(store)
+    store.db
       .prepare(
         "INSERT INTO video_notes(id,journey,version_id,step_id,recorder_id,recorder_name,media_id,medium,status,content_version,created_at) VALUES(?,?,?,?,?,?,?,?,'unprocessed',1,?)",
       )
@@ -319,14 +317,14 @@ export function saveProcessing(
           atMs: p.atMs,
         });
       } else if (pin.decision) continue;
-      db(store)
+      store.db
         .prepare(
           "INSERT INTO pin_proposals VALUES(?,?,?) ON CONFLICT(pin_id) DO UPDATE SET quote=excluded.quote, proposal=excluded.proposal",
         )
         .run(p.pinId, p.quote, p.proposal);
     }
     const contentVersion = note.contentVersion + 1;
-    db(store)
+    store.db
       .prepare(
         "UPDATE video_notes SET transcript=?, summary=?, status='processed', content_version=? WHERE id=?",
       )
@@ -334,6 +332,31 @@ export function saveProcessing(
     appendFeed(store, journey, "note", { noteId, contentVersion }, now);
     return getNote(store, journey, noteId);
   });
+}
+
+/**
+ * Why a pin can no longer take a decision, with the decision that stands: its note was
+ * retracted (the pin is gone) or a revision request already carries it. Null when it can.
+ */
+export function closedPin(
+  store: Store,
+  journey: string,
+  pinId: string,
+): { reason: string; current: PinDecision | null } | null {
+  const r = store.db
+    .prepare("SELECT request_id FROM pins WHERE id=? AND journey=?")
+    .get(pinId, journey);
+  if (!r)
+    return {
+      reason: "This comment is no longer in the gallery",
+      current: null,
+    };
+  if (r.request_id != null)
+    return {
+      reason: "This comment is already in a revision request",
+      current: currentDecision(store, pinId),
+    };
+  return null;
 }
 
 /**
@@ -352,7 +375,7 @@ export function decidePin(
   const input = decisionInputSchema.parse(raw);
   return store.transaction(() => {
     const me = who(store, journey, actor);
-    const r = db(store)
+    const r = store.db
       .prepare(
         "SELECT p.note_id, p.request_id, q.proposal FROM pins p LEFT JOIN pin_proposals q ON q.pin_id=p.id WHERE p.id=? AND p.journey=?",
       )
@@ -379,10 +402,10 @@ export function decidePin(
     const refused = (current?.id ?? null) !== input.expected;
     const id = randomUUID();
     if (!refused)
-      db(store)
+      store.db
         .prepare("UPDATE pin_decisions SET superseded=1 WHERE pin_id=?")
         .run(pinId);
-    db(store)
+    store.db
       .prepare(
         "INSERT INTO pin_decisions(id,pin_id,status,text,member_id,member_name,at,superseded,refused) VALUES(?,?,?,?,?,?,?,?,?)",
       )
@@ -471,7 +494,7 @@ export function consumeDecidedPins(
   for (const note of listNotes(store, journey)) {
     for (const p of note.pins) {
       if (p.requestId || !p.decision) continue;
-      db(store)
+      store.db
         .prepare("UPDATE pins SET request_id=? WHERE id=?")
         .run(requestId, p.id);
       if (p.decision.status === "dropped") continue;
@@ -517,9 +540,9 @@ export function retractNote(
     if (actor.role !== "owner" && note.recorderId !== actor.memberId)
       throw new Fault(403, "Only the recorder or the owner can retract a note");
     if (note.status === "retracted") return { note, mediaId: null };
-    db(store).prepare("DELETE FROM pins WHERE note_id=?").run(noteId);
+    store.db.prepare("DELETE FROM pins WHERE note_id=?").run(noteId);
     const contentVersion = note.contentVersion + 1;
-    db(store)
+    store.db
       .prepare(
         "UPDATE video_notes SET status='retracted', transcript=NULL, summary=NULL, media_id=NULL, content_version=? WHERE id=?",
       )
@@ -571,13 +594,13 @@ export function recordTurn(
     )
       throw new Fault(400, "Round names a version outside this journey");
     if (
-      db(store)
+      store.db
         .prepare("SELECT 1 FROM turns WHERE journey=? AND loop_turn_id=?")
         .get(journey, t.loopTurnId)
     )
       throw new Fault(409, "This round was already recorded");
     const id = randomUUID();
-    db(store)
+    store.db
       .prepare(
         "INSERT INTO turns(id,journey,loop_turn_id,parent_ids,inputs,outputs,reaction_note_ids,version_id,not_version_reason,author_id,author_name,at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
       )
@@ -596,14 +619,12 @@ export function recordTurn(
         now,
       );
     appendFeed(store, journey, "turn", { turnId: id }, now);
-    return turnRow(
-      db(store).prepare("SELECT * FROM turns WHERE id=?").get(id)!,
-    );
+    return turnRow(store.db.prepare("SELECT * FROM turns WHERE id=?").get(id)!);
   });
 }
 
 export function listTurns(store: Store, journey: string): Turn[] {
-  return db(store)
+  return store.db
     .prepare("SELECT * FROM turns WHERE journey=? ORDER BY n")
     .all(journey)
     .map(turnRow);
@@ -631,13 +652,13 @@ export function shelve(
   return store.transaction(() => {
     const me = who(store, journey, actor);
     store.get(journey);
-    db(store)
+    store.db
       .prepare(
         "INSERT INTO shelf(id,journey,item_id,reason,member_id,member_name,at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(journey,item_id) DO UPDATE SET reason=excluded.reason, member_id=excluded.member_id, member_name=excluded.member_name, at=excluded.at",
       )
       .run(randomUUID(), journey, s.itemId, s.reason, me.id, me.name, now);
     const row = shelfRow(
-      db(store)
+      store.db
         .prepare("SELECT * FROM shelf WHERE journey=? AND item_id=?")
         .get(journey, s.itemId)!,
     );
@@ -647,7 +668,7 @@ export function shelve(
 }
 
 export function listShelf(store: Store, journey: string): ShelfItem[] {
-  return db(store)
+  return store.db
     .prepare("SELECT * FROM shelf WHERE journey=? ORDER BY n")
     .all(journey)
     .map(shelfRow);

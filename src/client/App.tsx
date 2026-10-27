@@ -40,7 +40,6 @@ export function App() {
     [newMemberToken, setNewMemberToken] = useState("");
   const owner = session?.role === "owner";
   const memberSession = session?.role === "member";
-  // Video notes, turns and the shelf are for the owner and members only.
   const seesNotes = owner || memberSession;
   const v =
     journey?.versions.find((v: any) => v.id === versionId) ??
@@ -436,6 +435,7 @@ export function App() {
                     key={`${v.id}-${step.id}`}
                     journey={journey}
                     version={v}
+                    holdVersion={() => setVersionId(v.id)}
                     step={step}
                     previous={previous}
                     owner={owner}
@@ -1020,6 +1020,7 @@ function ScreenReview({
   loadNotes,
   refresh,
   action,
+  holdVersion,
 }: any) {
   const [tool, setTool] = useState<"screen" | "point" | "region">("screen"),
     [anchor, setAnchor] = useState<Anchor>({ kind: "screen" }),
@@ -1031,6 +1032,10 @@ function ScreenReview({
   const img = useRef<HTMLImageElement>(null);
   const rec = useRecorder();
   const recording = rec.phase === "recording";
+  // A newer version arriving mid-take would remount this screen and drop the take.
+  useEffect(() => {
+    if (rec.phase !== "idle") holdVersion();
+  }, [rec.phase]);
   // Only the recorder's own Loop can process a recording, and a confidential seed records nothing.
   const member = session?.role === "member";
   const canRecord = member && !!session.linkedLoopAt && !journey.confidential;

@@ -3,7 +3,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { validateRaster, type Raster } from "../shared/raster.js";
 import { ZodError } from "zod";
 import { Store, Fault, digest } from "./domain.js";
-import { defaultMediaDir, getMedia, saveUpload } from "./media.js";
+import { baseMime, defaultMediaDir, getMedia, saveUpload } from "./media.js";
 import {
   decidePin,
   latestSeq,
@@ -128,6 +128,15 @@ export function createServer(o: ServerOptions) {
       throw new Fault(403, "Write origin is not allowed");
     const m = requireMember(o.store, req);
     try {
+      if (
+        !req.headers.authorization?.startsWith("Bearer ") &&
+        /^(audio|video)\//.test(baseMime(req.headers["content-type"])) &&
+        isConfidential(o.store, m.journey)
+      )
+        throw new Fault(
+          409,
+          "This project is marked confidential, so recording is off: recordings are shared with the team.",
+        );
       const { media, existing } = await saveUpload(o.store, mediaDir, {
         journey: m.journey,
         uploader: m.memberId,
@@ -330,7 +339,6 @@ export function createServer(o: ServerOptions) {
       confidential: isConfidential(o.store, id),
     });
   });
-  // Video notes, pins, turns and shelf for the gallery screens (owner and members).
   const noteReader = (req: Request) => {
     const a = access(req);
     if (a.role !== "owner" && a.role !== "member")

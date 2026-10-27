@@ -386,7 +386,7 @@ export class Store {
   markLinkedLoop(id: string, now = Date.now()) {
     this.db
       .prepare(
-        "UPDATE member_grants SET linked_loop_at=COALESCE(linked_loop_at,?) WHERE id=?",
+        "UPDATE member_grants SET linked_loop_at=? WHERE id=? AND linked_loop_at IS NULL",
       )
       .run(now, id);
     return this.memberGrant(id);

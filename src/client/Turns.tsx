@@ -10,7 +10,6 @@ const day = (at: number) =>
     minute: "2-digit",
   });
 
-/** Read-only history of the journey's turns, in order, and its shelf, newest first. */
 export function TurnsView({
   turns,
   shelf,
@@ -135,7 +134,6 @@ export function TurnsView({
   );
 }
 
-/** Loads turns and shelf, again whenever the journey's feed moves on. */
 export function Turns({
   journey,
   notes,

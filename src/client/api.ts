@@ -19,7 +19,6 @@ export async function api(path: string, body?: unknown) {
     throw new ApiError(data.error?.message ?? "Request failed", r.status, data);
   return data;
 }
-/** Streams a recording to the journey's media store; returns the stored media. */
 export async function uploadMedia(journey: string, blob: Blob) {
   const r = await fetch(`/api/journeys/${encodeURIComponent(journey)}/media`, {
     method: "PUT",

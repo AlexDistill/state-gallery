@@ -104,7 +104,6 @@ export function setMediaRestricted(
   if (!r.changes) throw new Fault(404, "Media not found");
 }
 
-/** Record that a committed note references this media, so the sweep keeps it. */
 export function referenceMedia(
   store: Store,
   mediaId: string,
