@@ -585,6 +585,15 @@ select:focus {
   display: grid;
   gap: 18px;
 }
+.access-card details {
+  margin-top: 20px;
+  font-size: 12px;
+  color: #697461;
+}
+.access-card details summary {
+  cursor: pointer;
+  margin-bottom: 14px;
+}
 footer {
   border-top: 1px solid #dce1d6;
   padding: 24px 40px;
@@ -676,5 +685,235 @@ footer {
   .discussion {
     position: static;
     max-height: none;
+  }
+}
+
+/* Video notes: recording, pins and decisions */
+.recorder {
+  margin: 14px 0;
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid #dce2d4;
+  border-radius: 6px;
+}
+.recorder p {
+  margin: 0 0 10px;
+}
+.recorder .button-row {
+  align-items: center;
+}
+.recorder audio,
+.recorder video {
+  width: 100%;
+  margin-bottom: 12px;
+}
+.recorder video {
+  max-height: 360px;
+  background: #1d231c;
+}
+.recorder h3 {
+  margin-top: 0;
+}
+label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+.recording-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #963d26;
+  font-weight: 600;
+  font-size: 13px;
+}
+.recording-status .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #c03d24;
+}
+.recorder-hint {
+  margin: 10px 0 14px;
+}
+.annotated.recording {
+  cursor: crosshair;
+  touch-action: none;
+  outline: 2px solid #c03d24;
+  outline-offset: 2px;
+}
+.timeline {
+  position: relative;
+  height: 28px;
+  margin: 4px 12px 10px;
+  border-bottom: 2px solid #d7ddd1;
+}
+.timeline-pin {
+  position: absolute;
+  bottom: -12px;
+  transform: translateX(-50%);
+  width: 23px;
+  height: 23px;
+  padding: 0;
+  border-radius: 50%;
+  border: 0;
+  background: #3d5f8a;
+  font-size: 11px;
+  line-height: 23px;
+}
+.marker.note-pin {
+  pointer-events: auto;
+  cursor: pointer;
+  border: 0;
+  padding: 0;
+  background: #3d5f8a;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 23px;
+}
+.marker.region.note-pin {
+  border: 2px solid #3d5f8a;
+  background: #3d5f8a26;
+  color: #2b4566;
+  line-height: 22px;
+}
+.marker.note-pin.open {
+  box-shadow: 0 0 0 3px #3d5f8a66;
+}
+.marker.recording-pin {
+  background: #c03d24;
+}
+.marker.region.recording-pin {
+  border-color: #c03d24;
+  background: #c03d2426;
+  color: #963d26;
+}
+.video-notes {
+  border-bottom: 1px solid #dee4d6;
+  padding-bottom: 18px;
+  margin-bottom: 18px;
+}
+.video-notes h3 {
+  margin-top: 0;
+}
+.video-note {
+  font-size: 13px;
+  margin-top: 14px;
+}
+.video-note p {
+  margin: 6px 0 10px;
+}
+.waiting {
+  color: #836332;
+}
+.pin-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  font-weight: 500;
+  margin-top: 6px;
+}
+.pin-row.ghost {
+  color: #24361e;
+}
+.pin-number {
+  flex: none;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  background: #3d5f8a;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 21px;
+  text-align: center;
+}
+.pin-title {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pin-status {
+  font-size: 11px;
+  color: #65745b;
+}
+.pin-detail {
+  padding: 12px 0 4px 14px;
+  border-left: 2px solid #c6d3e2;
+  margin: 8px 0 8px 10px;
+}
+.pin-detail blockquote {
+  margin: 0 0 10px;
+  color: #4b5745;
+  font-style: italic;
+}
+.pin-detail p {
+  margin: 6px 0 12px;
+}
+.pin-detail textarea {
+  width: 100%;
+  min-height: 80px;
+}
+.pin-detail form {
+  display: grid;
+  gap: 10px;
+}
+.decision {
+  color: #355533;
+  background: #eef4e9;
+  border-radius: 5px;
+  padding: 8px 10px;
+}
+.decision-history {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  font-size: 11px;
+  color: #697461;
+  line-height: 1.7;
+}
+
+/* Turns and shelf */
+.turns-view .panel:first-child {
+  margin-top: 0;
+}
+.turn-list,
+.shelf-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.turn,
+.shelf-item {
+  border-top: 1px solid #e5eadd;
+  padding: 16px 0;
+  font-size: 13px;
+}
+.turn-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 10px;
+}
+.turn-columns ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.turn-columns p {
+  margin: 6px 0 0;
+}
+.not-a-version {
+  color: #836332;
+}
+.shelf-item p {
+  margin: 4px 0;
+}
+@media (max-width: 760px) {
+  .turn-columns {
+    grid-template-columns: 1fr;
   }
 }

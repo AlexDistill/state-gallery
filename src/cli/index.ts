@@ -11,6 +11,7 @@ const commands: Record<string, { usage: string; min: number; max: number }> = {
   init: { usage: "init [directory]", min: 0, max: 1 },
   journeys: { usage: "journeys", min: 0, max: 0 },
   create: { usage: "create <title>", min: 1, max: 1 },
+  invite: { usage: "invite <journey> <display-name>", min: 2, max: 2 },
   validate: { usage: "validate <manifest>", min: 1, max: 1 },
   import: {
     usage: "import <journey> <manifest> <submission-key>",
@@ -115,6 +116,25 @@ async function main() {
   const c = Client.fromEnvironment();
   if (command === "create") {
     console.log(JSON.stringify(await c.createJourney(args[0]), null, 2));
+    return;
+  }
+  if (command === "invite") {
+    const g = await c.inviteMember(args[0], args[1]);
+    console.log(
+      JSON.stringify(
+        {
+          memberId: g.id,
+          name: g.name,
+          link: g.link,
+          expiresAt: new Date(g.inviteExpiresAt).toISOString(),
+        },
+        null,
+        2,
+      ),
+    );
+    console.error(
+      "Send this link privately. It works once and expires in 7 days.",
+    );
     return;
   }
   if (command === "journeys") {
