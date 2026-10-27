@@ -45,7 +45,7 @@ export function NotesPanel({
           </div>
           {note.status === "unprocessed" && (
             <p className="small waiting">
-              Waiting for {note.recorderName}'s Loop to process this
+              Waiting for {note.recorderName}'s Loop
             </p>
           )}
           {note.summary && <p>{note.summary}</p>}
@@ -61,7 +61,7 @@ export function NotesPanel({
                 >
                   <span className="pin-number">{n}</span>
                   <span className="pin-title">
-                    {pin.proposal?.proposal ?? `Pin ${n}`}
+                    {pin.proposal?.proposal ?? `Comment ${n}`}
                   </span>
                   <span className="pin-status">
                     {pin.decision
@@ -141,7 +141,7 @@ function PinDetail({
   };
   const processed = note.status === "processed";
   return (
-    <div className="pin-detail" aria-label={`Pin ${number}`}>
+    <div className="pin-detail" aria-label={`Comment ${number}`}>
       {pin.proposal ? (
         <>
           <blockquote>“{pin.proposal.quote}”</blockquote>
@@ -151,7 +151,7 @@ function PinDetail({
           </p>
         </>
       ) : processed ? (
-        <p className="small">No change was proposed for this pin.</p>
+        <p className="small">No change was proposed for this comment.</p>
       ) : null}
       {conflict && conflict.id !== pin.decision?.id && (
         <p className="error" role="alert">
@@ -174,7 +174,7 @@ function PinDetail({
       )}
       {pin.requestId ? (
         <p className="small">
-          In a revision request; this pin can't be decided again.
+          In a revision request; this comment can't be decided again.
         </p>
       ) : (
         processed && (

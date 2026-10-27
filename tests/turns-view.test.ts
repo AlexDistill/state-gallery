@@ -72,7 +72,7 @@ async function fixture() {
   turn("t3", 3000, {
     outputs: [{ title: "Home screen v2", kind: "image" }],
     notAVersionReason:
-      "Another version was added from the same parent first. Pull, then redo this turn from the latest version.",
+      "Another version was added from the same parent first. Get the latest from the gallery, then redo this round from the latest version.",
   });
   shelve(store, j.id, { itemId: "old-hero", reason: "Too loud" }, alex, 1000);
   shelve(
@@ -126,7 +126,10 @@ test("three pushed turns render in order; a video output is a listed item, not a
     [...order].sort((a, b) => a - b),
     order,
   );
-  assert.match(html, /Turn 1 · Alex[\s\S]*Became version 1 · 1 image as steps/);
+  assert.match(
+    html,
+    /Round 1 · Alex[\s\S]*Became version 1 · 1 image as steps/,
+  );
   assert.match(html, /<li class="turn-output">Walkthrough video<\/li>/);
   assert.match(html, /<li class="turn-output">Copy notes<\/li>/);
   assert.match(html, /Note note-x/);

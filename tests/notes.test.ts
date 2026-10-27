@@ -400,7 +400,10 @@ test("notes reject unknown members, steps and colliding pin ids", () => {
     /Screen/,
   );
   note(v1.id, ["dup"]);
-  assert.throws(() => createNote(store, j.id, input("dup"), maya), /pin/i);
+  assert.throws(
+    () => createNote(store, j.id, input("dup"), maya),
+    /comment id/i,
+  );
   store.close();
 });
 

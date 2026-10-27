@@ -71,7 +71,7 @@ function stepOf(j: Journey, versionId: string, stepId: string) {
 
 function checkAnchor(anchor: Anchor, step: { assetId?: string }) {
   if (anchor.kind !== "screen" && !step.assetId)
-    throw new Fault(400, "Point and region pins require an image");
+    throw new Fault(400, "Point and region comments need an image");
 }
 
 function insertPin(
@@ -81,7 +81,7 @@ function insertPin(
   pin: { id: string; anchor: Anchor; atMs: number },
 ) {
   if (db(store).prepare("SELECT 1 FROM pins WHERE id=?").get(pin.id))
-    throw new Fault(409, `Pin id already used: ${pin.id}`);
+    throw new Fault(409, `Comment id already used: ${pin.id}`);
   db(store)
     .prepare(
       "INSERT INTO pins(id,note_id,journey,anchor,at_ms) VALUES(?,?,?,?,?)",
@@ -310,7 +310,7 @@ export function saveProcessing(
         if (!p.anchor || p.atMs == null)
           throw new Fault(
             400,
-            `A new pin needs an anchor and time: ${p.pinId}`,
+            `A new comment needs an anchor and time: ${p.pinId}`,
           );
         checkAnchor(p.anchor, step);
         insertPin(store, journey, noteId, {
@@ -357,18 +357,18 @@ export function decidePin(
         "SELECT p.note_id, p.request_id, q.proposal FROM pins p LEFT JOIN pin_proposals q ON q.pin_id=p.id WHERE p.id=? AND p.journey=?",
       )
       .get(pinId, journey);
-    if (!r) throw new Fault(404, "Pin not found");
+    if (!r) throw new Fault(404, "Comment not found");
     if (r.request_id != null)
       throw new Fault(
         409,
-        "This pin is already in a revision request and can't be decided again",
+        "This comment is already in a revision request and can't be decided again",
       );
     let text: string | null = null;
     if (input.status === "approved") {
       if (r.proposal == null)
         throw new Fault(
           409,
-          "This pin has no proposed change yet. Change it with your own text or drop it.",
+          "This comment has no proposed change yet. Change it with your own text or drop it.",
         );
       text = String(r.proposal);
     } else if (input.status === "changed") {
@@ -569,13 +569,13 @@ export function recordTurn(
       t.versionId &&
       !store.get(journey).versions.some((v) => v.id === t.versionId)
     )
-      throw new Fault(400, "Turn names a version outside this journey");
+      throw new Fault(400, "Round names a version outside this journey");
     if (
       db(store)
         .prepare("SELECT 1 FROM turns WHERE journey=? AND loop_turn_id=?")
         .get(journey, t.loopTurnId)
     )
-      throw new Fault(409, "This turn was already recorded");
+      throw new Fault(409, "This round was already recorded");
     const id = randomUUID();
     db(store)
       .prepare(

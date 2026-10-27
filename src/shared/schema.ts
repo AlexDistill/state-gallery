@@ -93,7 +93,7 @@ export const noteInputSchema = z
   })
   .refine(
     (n) => new Set(n.pins.map((p) => p.id)).size === n.pins.length,
-    "Duplicate pin IDs",
+    "Duplicate comment IDs",
   );
 export const processingSchema = z.object({
   transcript: z.string().max(500_000),

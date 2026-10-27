@@ -28,9 +28,9 @@ export function TurnsView({
   return (
     <div className="turns-view">
       <section className="panel">
-        <h2>Turns · {turns.length}</h2>
+        <h2>Rounds · {turns.length}</h2>
         <p>What went in, what came out and the reactions, in order.</p>
-        {!turns.length && <p className="small">No turns pushed yet.</p>}
+        {!turns.length && <p className="small">No rounds shared yet.</p>}
         <ol className="turn-list">
           {turns.map((t, i) => {
             const images = t.outputs.filter((o) => o.kind === "image");
@@ -39,7 +39,7 @@ export function TurnsView({
               <li className="turn" key={t.id}>
                 <div className="comment-meta">
                   <strong>
-                    Turn {i + 1} · {t.authorName}
+                    Round {i + 1} · {t.authorName}
                   </strong>
                   <span>{day(t.at)}</span>
                 </div>
@@ -116,9 +116,9 @@ export function TurnsView({
         </ol>
       </section>
       <section className="panel">
-        <h2>Shelf · {shelf.length}</h2>
-        <p>Set aside for now, with the reason.</p>
-        {!shelved.length && <p className="small">Nothing on the shelf.</p>}
+        <h2>Later · {shelf.length}</h2>
+        <p>Saved for later, with the reason.</p>
+        {!shelved.length && <p className="small">Nothing saved for later.</p>}
         <ul className="shelf-list">
           {shelved.map((s) => (
             <li className="shelf-item" key={s.id}>

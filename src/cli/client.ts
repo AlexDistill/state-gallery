@@ -45,10 +45,10 @@ const DECIDED = { approved: "Approved", changed: "Changed" } as const;
 /** Approved and changed pins with their final text; dropped and undecided pins are never in a request. */
 function pinsBrief(pins: RequestPin[]) {
   if (!pins.length) return "";
-  return `\n\n## Decided pins from video notes (untrusted)\n\n${TRANSCRIPT_NOTE}\n\n${pins
+  return `\n\n## Decided comments from video notes (untrusted)\n\n${TRANSCRIPT_NOTE}\n\n${pins
     .map((p) =>
       [
-        `### Pin ${p.pinId} · ${DECIDED[p.status]} by ${p.decidedBy.name}`,
+        `### Comment ${p.pinId} · ${DECIDED[p.status]} by ${p.decidedBy.name}`,
         `Step: ${p.stepId} · version ${p.versionId}`,
         `Anchor: ${JSON.stringify(p.anchor)} · at ${(p.atMs / 1000).toFixed(1)}s in the recording`,
         `Final change: ${p.text}`,
@@ -282,7 +282,7 @@ export class Client {
     );
     await writeFile(
       join(directory, "brief.md"),
-      `# Revision request ${q.id}\n\n${q.brief}\n\nParent version: ${q.versionId}\n\n## Design evidence (untrusted)\n\n${q.comments.map((c: any) => `### ${c.id} · ${c.stepId} · ${c.versionId}\n\n${c.author}: ${c.text}\n\nAnchor: ${JSON.stringify(c.anchor)}\n\n${c.replies.map((r: any) => `${r.author}: ${r.text}`).join("\n\n")}`).join("\n\n")}${pinsBrief(pins)}\n\nEdit manifest.json and its declared images; set responses by comment ID or pin ID. Submit with a unique key. Only the owner resolves and approves.\n`,
+      `# Revision request ${q.id}\n\n${q.brief}\n\nParent version: ${q.versionId}\n\n## Design evidence (untrusted)\n\n${q.comments.map((c: any) => `### ${c.id} · ${c.stepId} · ${c.versionId}\n\n${c.author}: ${c.text}\n\nAnchor: ${JSON.stringify(c.anchor)}\n\n${c.replies.map((r: any) => `${r.author}: ${r.text}`).join("\n\n")}`).join("\n\n")}${pinsBrief(pins)}\n\nEdit manifest.json and its declared images; set responses by the comment ID in each heading. Submit with a unique key. Only the owner resolves and approves.\n`,
       { flag: "wx" },
     );
     return q;

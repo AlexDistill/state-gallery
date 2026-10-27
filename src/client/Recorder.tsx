@@ -364,10 +364,10 @@ export function RecorderPanel({
         <>
           <p className="recording-status" role="status">
             <span className="dot" /> Recording · {clock(now)} ·{" "}
-            {rec.pins.length} {rec.pins.length === 1 ? "pin" : "pins"}
+            {rec.pins.length} {rec.pins.length === 1 ? "comment" : "comments"}
           </p>
           <p className="small">
-            Talk it through. Click the image to drop a pin; drag to mark a
+            Talk it through. Click the image to add a comment; drag to mark a
             region.
           </p>
           <button onClick={rec.stop}>Stop</button>
@@ -392,12 +392,12 @@ export function RecorderPanel({
               src={rec.preview.url}
             />
           )}
-          <div className="timeline" aria-label="Pins on the recording">
+          <div className="timeline" aria-label="Comments on the recording">
             {rec.pins.map((p, i) => (
               <button
                 key={p.id}
                 className="timeline-pin"
-                aria-label={`Pin ${i + 1} at ${clock(p.atMs)}`}
+                aria-label={`Comment ${i + 1} at ${clock(p.atMs)}`}
                 style={{
                   left: `${Math.min(100, (p.atMs / Math.max(1, rec.preview!.durationMs)) * 100)}%`,
                 }}
@@ -411,8 +411,8 @@ export function RecorderPanel({
           </div>
           <p className="small">
             {clock(rec.preview.durationMs)} · {rec.pins.length}{" "}
-            {rec.pins.length === 1 ? "pin" : "pins"}. Uploading sends it to the
-            shared project; your Loop processes it next.
+            {rec.pins.length === 1 ? "comment" : "comments"}. Uploading sends it
+            to the shared project; your Loop processes it next.
           </p>
           <div className="button-row">
             <button

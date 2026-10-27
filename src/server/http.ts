@@ -380,7 +380,7 @@ export function createServer(o: ServerOptions) {
         .prepare("SELECT 1 FROM pins WHERE id=? AND journey=?")
         .get(pin, String(req.params.id))
     )
-      throw new Fault(404, "Pin not found");
+      throw new Fault(404, "Comment not found");
     return pin;
   };
   app.post("/api/journeys/:id/pins/:pin/decisions", (req, res) => {

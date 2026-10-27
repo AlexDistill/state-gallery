@@ -409,7 +409,7 @@ export function App() {
                         setView("turns");
                       }}
                     >
-                      Turns
+                      Rounds
                     </button>
                   )}
                   {v.steps.map((s: any, i: number) => (
@@ -519,8 +519,8 @@ export function App() {
               <section className="panel">
                 <h2>Revision request</h2>
                 <p>
-                  Sends the current version's decided pins to the next turn.
-                  Dropped pins resolve; undecided pins stay open.
+                  Sends the current version's decided comments to the next
+                  round. Dropped comments resolve; undecided ones stay open.
                 </p>
                 <button
                   disabled={v.id !== journey.currentId}
@@ -540,10 +540,10 @@ export function App() {
                 {journey.requests.length > 0 && (
                   <p className="small">
                     Latest request: {journey.requests.at(-1).pins?.length ?? 0}{" "}
-                    decided pins ·{" "}
+                    decided comments ·{" "}
                     {journey.requests.at(-1).successorId
                       ? "revision received"
-                      : "waiting for the next turn"}
+                      : "waiting for the next round"}
                   </p>
                 )}
               </section>
@@ -1194,7 +1194,7 @@ function ScreenReview({
                     anchor={pin.anchor}
                     key={pin.id}
                     label={String(i + 1)}
-                    kind="Pin"
+                    kind="Video note comment"
                     className={`note-pin ${openPin === pin.id ? "open" : ""}`}
                     onOpen={() =>
                       setOpenPin(openPin === pin.id ? null : pin.id)
@@ -1206,7 +1206,7 @@ function ScreenReview({
                   anchor={p.anchor}
                   key={p.id}
                   label={String(i + 1)}
-                  kind="Recording pin"
+                  kind="Recording comment"
                   className="recording-pin"
                 />
               ))}

@@ -414,7 +414,7 @@ test(
     assert.equal(j.versions.length, 2);
     assert.equal(j.currentId, a.body.results[0].versionId);
     assert.equal(b.body.results[0].versionId, null);
-    assert.match(b.body.results[0].notAVersionReason, /[Pp]ull/);
+    assert.match(b.body.results[0].notAVersionReason, /redo this round/);
     const turns = listTurns(t.store, t.j.id);
     assert.deepEqual(
       turns.map((x) => [x.authorName, !!x.versionId, !!x.notAVersionReason]),

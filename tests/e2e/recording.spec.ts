@@ -33,14 +33,18 @@ test("recording 3 seconds of voice with two clicks uploads one audio note with t
     [0.75, 0.6],
   ]);
   // The preview shows the pins on a timeline before anything is sent.
-  await expect(page.getByRole("button", { name: /^Pin 1 at / })).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Pin 2 at / })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /^Comment 1 at / }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /^Comment 2 at / }),
+  ).toBeVisible();
   await expect(page.locator("audio")).toBeVisible();
   await page.getByRole("button", { name: "Upload", exact: true }).click();
+  await expect(page.getByText("Waiting for Alex's Loop").first()).toBeVisible();
   await expect(
-    page.getByText("Waiting for Alex's Loop to process this").first(),
+    page.getByRole("button", { name: "Video note comment 2 point" }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Pin 2 point" })).toBeVisible();
 
   const { body } = await asMember(alex.token, `/journeys/${journey}/notes`);
   expect(body.notes).toHaveLength(1);
@@ -78,7 +82,9 @@ test("Discard uploads nothing", async ({ page }) => {
     if (r.method() !== "GET") sent.push(`${r.method()} ${r.url()}`);
   });
   await record(page, [[0.5, 0.5]]);
-  await expect(page.getByRole("button", { name: /^Pin 1 at / })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /^Comment 1 at / }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Discard" }).click();
   await expect(page.getByRole("button", { name: "Record note" })).toBeVisible();
   expect(sent.filter((s) => /\/media|\/notes/.test(s))).toEqual([]);

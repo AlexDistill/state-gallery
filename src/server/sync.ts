@@ -60,7 +60,10 @@ const linkSchema = z.object({
   seedId: id,
   bed: z
     .string()
-    .regex(/^shared:.{1,200}$/, "Only a shared: bed can link to the gallery"),
+    .regex(
+      /^shared:.{1,200}$/,
+      "Only a shared: workspace can link to the gallery",
+    ),
   confidential: z.boolean(),
 });
 /**
@@ -228,7 +231,7 @@ function ownMedia(
   if (!m || m.journey !== journey)
     throw new Fault(
       400,
-      `Media ${mediaId} is not uploaded to this journey. Upload it, then push again.`,
+      `Media ${mediaId} is not uploaded to this journey. Upload it, then share with the team again.`,
     );
   if (!uploadedBy(store, m.id, memberId))
     throw new Fault(403, `Media ${mediaId} was uploaded by another member`);
@@ -347,7 +350,7 @@ export function createGalleryNote(
     if (isConfidential(store, journey))
       throw new Fault(
         409,
-        "This seed is marked confidential, so recording is off. Recordings go to the shared project.",
+        "This project is marked confidential, so recording is off: recordings are shared with the team.",
       );
     const input = noteInputSchema.parse(raw);
     const pointer = pointerSchema
@@ -452,14 +455,17 @@ function applyTurn(
   let reason: string | null = null;
   if (t.outputs.some((o) => o.kind === "image")) {
     if (!t.version)
-      throw new Fault(400, "A turn with image outputs needs its version steps");
+      throw new Fault(
+        400,
+        "A round with image outputs needs its version steps",
+      );
     const j = store.get(journey);
     if ((j.currentId ?? null) !== t.parentVersionId)
       reason =
-        "Another version was added from the same parent first. Pull, then redo this turn from the latest version.";
+        "Another version was added from the same parent first. Get the latest from the gallery, then redo this round from the latest version.";
     else if (t.requestId && !openRequestFor(j, t.requestId))
       reason =
-        "The revision request this turn answers was superseded. Pull, then redo it from the latest request.";
+        "The revision request this round answers was replaced. Get the latest from the gallery, then redo it from the latest request.";
     else {
       const assets: Record<
         string,
@@ -474,7 +480,7 @@ function applyTurn(
         } catch {
           throw new Fault(
             400,
-            `Media ${m.id} is not uploaded to this journey. Upload it, then push again.`,
+            `Media ${m.id} is not uploaded to this journey. Upload it, then share with the team again.`,
           );
         }
         assets[m.id] = {
@@ -499,7 +505,7 @@ function applyTurn(
       versionId = v.id;
     }
   } else if (t.version)
-    throw new Fault(400, "Version steps need an image output on the turn");
+    throw new Fault(400, "Version steps need an image output on the round");
   const turn = recordTurn(
     store,
     journey,
@@ -562,7 +568,7 @@ export function push(
       if (linked.confidential || isConfidential(store, journey))
         throw new Fault(
           409,
-          "This seed is confidential: a push can only carry decisions and retractions",
+          "This project is confidential, so only decisions and retractions can be shared with the team",
         );
     };
     for (const n of p.notes)

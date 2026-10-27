@@ -107,15 +107,19 @@ test("approving, editing and dropping three pins shows three decisions with the 
 
   // A member requests the revision: decided pins go in, the dropped one resolves.
   await page.getByRole("button", { name: "Request revision" }).click();
-  await expect(page.getByText(/Latest request: 2 decided pins/)).toBeVisible();
+  await expect(
+    page.getByText(/Latest request: 2 decided comments/),
+  ).toBeVisible();
   await page.getByRole("button", { name: /Enlarge the title/ }).click();
   await expect(
-    page.getByText("In a revision request; this pin can't be decided again."),
+    page.getByText(
+      "In a revision request; this comment can't be decided again.",
+    ),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "Turns", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Turns · 0" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Shelf · 0" })).toBeVisible();
+  await page.getByRole("button", { name: "Rounds", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Rounds · 0" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Later · 0" })).toBeVisible();
 });
 
 test("a stale decision shows the existing one and changes nothing", async ({
