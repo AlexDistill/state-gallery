@@ -104,6 +104,8 @@ export interface VideoNote {
   summary: string | null;
   contentVersion: number;
   createdAt: number;
+  /** The pushing member's Loop note id, so their Loop knows its own note; null for a browser recording. */
+  loopNoteId: string | null;
   pins: Pin[];
 }
 export interface RequestPin {

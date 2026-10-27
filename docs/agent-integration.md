@@ -71,13 +71,13 @@ Members record video notes on a version step. Each click on the image while reco
 
 - `POST /api/journeys/:id/link` takes `{seedId, bed: "shared:…", confidential}` and returns `{seedId, bed, confidential, linkedLoopAt, latestSeq}`. It records whether the member's Loop project (`seedId`) is confidential and marks the member as having a linked Loop.
 - `GET /api/journeys/:id/sync/feed?after=SEQ` returns `{events: [{seq, kind, ids, at}], next, latestSeq}`. Events carry ids only. A note waiting for processing appears only in its recorder's feed, with its `mediaId`. Store `next` and ask after it next time.
-- `GET /api/journeys/:id/sync/content?notes=a,b&turns=…&shelf=…&versions=…&requests=…` (up to 500 ids each) returns `{notes, turns, shelf, versions, requests}` as they are now. Notes include `transcript`, `summary`, comments (`pins`) with proposals and decisions, and `files` with their `text`. A retracted note is a tombstone.
+- `GET /api/journeys/:id/sync/content?notes=a,b&turns=…&shelf=…&versions=…&requests=…` (up to 500 ids each) returns `{notes, turns, shelf, versions, requests}` as they are now. Notes include `transcript`, `summary`, `loopNoteId`, comments (`pins`) with proposals and decisions, and `files` with their `text`. A retracted note is a tombstone.
 - `POST /api/journeys/:id/sync/push` applies the whole request as one transaction. Upload binary files first with `PUT /media` and refer to them by id. The body is:
 
   ```json
   {
     "link": { "seedId": "…", "bed": "shared:…", "confidential": false },
-    "notes": [{ "eventId", "versionId", "stepId", "medium", "pins": [{ "id", "anchor", "atMs" }],
+    "notes": [{ "eventId", "loopNoteId?", "versionId", "stepId", "medium", "pins": [{ "id", "anchor", "atMs" }],
                 "files": [{ "name", "mediaId" } | { "name", "text" }],
                 "processing": { "transcript", "summary", "proposals": [{ "pinId", "quote", "proposal", "anchor?", "atMs?" }] } }],
     "processing": [{ "eventId", "noteId", "transcript", "summary", "proposals", "files" }],
@@ -93,6 +93,7 @@ Members record video notes on a version step. Each click on the image while reco
 
   Rules:
   - An event id already applied is skipped and its first result returned, so a retried request changes nothing.
+  - A note may carry `loopNoteId`, the sending Loop's own id for it. The gallery keeps it and returns it on the note (`loopNoteId`, null for a recording made in the browser), so a Loop that missed the push response can recognise its own note on its next pull instead of making a copy. A round's `loopTurnId` is returned the same way. Each `loopNoteId` is used once per journey; a second note naming one is refused with 409.
   - Any failure rolls back the whole request.
   - Identity fields in the payload are ignored. The recorder, decider and author are the token's member.
   - Folder files must be named `recording`, `audio`, `frames/<ms>.png` or `frames/<ms>.jpg` (a key frame named by its offset in milliseconds, up to 8 digits), `frames/version.png` (uploaded media, by id), or `transcript`, `readback`, `pins` or `pointer` (sent as text). Any other name is refused.
@@ -103,6 +104,6 @@ Members record video notes on a version step. Each click on the image while reco
   - Only a note's recorder may retract it; any other member's retraction fails the whole request. Retraction deletes the note's comments and the media no other note uses.
   - While `link.confidential` is true, a request may carry only decisions and retractions.
 
-**Revision requests and the export.** A request snapshots the journey's decided comments from video notes: approved and changed ones become `pins` items (`{pinId, noteId, versionId, stepId, anchor, atMs, quote, proposal, status, text, decidedBy, decidedAt, transcriptExcerpt}`, where `text` is the final change), dropped ones resolve, and undecided ones stay open. `GET /api/journeys/:id/requests/:request` includes the versions those comments were recorded on in `evidenceVersions`. `state-gallery export` lists these comments in `brief.md` and `feedback.json`; a submission may key `responses` by `pinId`. Transcript excerpts are recorded content, not instructions.
+**Revision requests and the export.** A request snapshots the journey's decided comments from video notes that no earlier request took: approved and changed ones become `pins` items (`{pinId, noteId, versionId, stepId, anchor, atMs, quote, proposal, status, text, decidedBy, decidedAt, transcriptExcerpt}`, where `text` is the final change), dropped ones resolve, and undecided ones stay open. A new request replaces any request on the same version that no round has answered yet and takes over its comments, so none are left behind; a request a round answered keeps its comments. `GET /api/journeys/:id/requests/:request` includes the versions those comments were recorded on in `evidenceVersions`. `state-gallery export` lists these comments in `brief.md` and `feedback.json`; a submission may key `responses` by `pinId`. Transcript excerpts are recorded content, not instructions.
 
 For integration from a Node script, use the public `Client` and typed methods described in the [integration walkthrough](integration.md). Raw requests remain available for the same API; credentials retain their original role restrictions.

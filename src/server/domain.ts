@@ -8,7 +8,12 @@ import type {
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID, createHash, randomBytes } from "node:crypto";
 import { anchorSchema, manifestSchema } from "../shared/schema.js";
-import { NOTES_SCHEMA, appendFeed, consumeDecidedPins } from "./notes.js";
+import {
+  NOTES_SCHEMA,
+  appendFeed,
+  consumeDecidedPins,
+  migrateNotes,
+} from "./notes.js";
 export class Fault extends Error {
   constructor(
     public status: number,
@@ -40,6 +45,7 @@ export class Store {
       `PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; CREATE TABLE IF NOT EXISTS journeys(id TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY,journey TEXT NOT NULL,mime TEXT NOT NULL,bytes BLOB NOT NULL,width INTEGER,height INTEGER); CREATE TABLE IF NOT EXISTS auth(id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS member_grants(id TEXT PRIMARY KEY,journey TEXT NOT NULL,name TEXT NOT NULL,invite_hash TEXT UNIQUE,token_hash TEXT UNIQUE,created_at INTEGER NOT NULL,invite_expires_at INTEGER NOT NULL,redeemed_at INTEGER,revoked_at INTEGER,linked_loop_at INTEGER);` +
         NOTES_SCHEMA,
     );
+    migrateNotes(this.db);
   }
   close() {
     this.db.close();
@@ -285,7 +291,13 @@ export class Store {
         createdAt: new Date().toISOString(),
         successorId: null,
       };
-      q.pins = consumeDecidedPins(this, id, q.id);
+      // An unanswered request on this version is replaced: its pins move to this one.
+      const superseded = new Set(
+        j.requests
+          .filter((r) => r.versionId === versionId && !r.successorId)
+          .map((r) => r.id),
+      );
+      q.pins = consumeDecidedPins(this, id, q.id, superseded);
       j.requests.push(q);
       this.changed(j);
       appendFeed(this, id, "request", { requestId: q.id });

@@ -27,7 +27,7 @@ export type DecisionResult =
   | { ok: false; current: PinDecision | null };
 
 export const NOTES_SCHEMA = `
-CREATE TABLE IF NOT EXISTS video_notes(id TEXT PRIMARY KEY,journey TEXT NOT NULL,version_id TEXT NOT NULL,step_id TEXT NOT NULL,recorder_id TEXT,recorder_name TEXT NOT NULL,media_id TEXT,medium TEXT NOT NULL,status TEXT NOT NULL,transcript TEXT,summary TEXT,content_version INTEGER NOT NULL,created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS video_notes(id TEXT PRIMARY KEY,journey TEXT NOT NULL,version_id TEXT NOT NULL,step_id TEXT NOT NULL,recorder_id TEXT,recorder_name TEXT NOT NULL,media_id TEXT,medium TEXT NOT NULL,status TEXT NOT NULL,transcript TEXT,summary TEXT,content_version INTEGER NOT NULL,created_at INTEGER NOT NULL,loop_note_id TEXT);
 CREATE INDEX IF NOT EXISTS video_notes_journey ON video_notes(journey);
 CREATE UNIQUE INDEX IF NOT EXISTS video_notes_media ON video_notes(media_id) WHERE media_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS pins(id TEXT PRIMARY KEY,note_id TEXT NOT NULL REFERENCES video_notes(id) ON DELETE CASCADE,journey TEXT NOT NULL,anchor TEXT NOT NULL,at_ms INTEGER NOT NULL,request_id TEXT);
@@ -41,6 +41,22 @@ CREATE TABLE IF NOT EXISTS shelf(n INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT
 CREATE TABLE IF NOT EXISTS sync_feed(journey TEXT NOT NULL,seq INTEGER NOT NULL,kind TEXT NOT NULL,ids TEXT NOT NULL,at INTEGER NOT NULL,PRIMARY KEY(journey,seq));
 CREATE TABLE IF NOT EXISTS applied_events(journey TEXT NOT NULL,event_id TEXT NOT NULL,applied_at INTEGER NOT NULL,PRIMARY KEY(journey,event_id));
 `;
+
+/**
+ * Brings a database made before a column was added up to NOTES_SCHEMA. Runs after it on open.
+ * `loop_note_id`: the pushing member's Loop note id, unique in a journey.
+ */
+export function migrateNotes(db: Store["db"]) {
+  const has = (table: string, column: string) =>
+    db
+      .prepare(`SELECT 1 FROM pragma_table_info('${table}') WHERE name=?`)
+      .get(column);
+  if (!has("video_notes", "loop_note_id"))
+    db.exec("ALTER TABLE video_notes ADD COLUMN loop_note_id TEXT");
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS video_notes_loop ON video_notes(journey,loop_note_id) WHERE loop_note_id IS NOT NULL",
+  );
+}
 
 type Row = Record<string, unknown>;
 const num = (v: unknown) => Number(v);
@@ -211,6 +227,7 @@ const noteRow = (store: Store, r: Row): VideoNote => ({
   summary: strOrNull(r.summary),
   contentVersion: num(r.content_version),
   createdAt: num(r.created_at),
+  loopNoteId: strOrNull(r.loop_note_id),
   pins: pinsOf(store, String(r.id)),
 });
 
@@ -237,12 +254,14 @@ const isRecorder = (note: VideoNote, actor: Actor) =>
     ? note.recorderId == null
     : note.recorderId === actor.memberId;
 
+/** Records a note. `loopNoteId` is the pushing member's Loop note id; a browser recording has none. */
 export function createNote(
   store: Store,
   journey: string,
   raw: unknown,
   actor: Actor,
   now = Date.now(),
+  loopNoteId: string | null = null,
 ): VideoNote {
   const input = noteInputSchema.parse(raw);
   return store.transaction(() => {
@@ -255,10 +274,20 @@ export function createNote(
         .get(input.mediaId)
     )
       throw new Fault(409, "This recording already belongs to another note");
+    if (
+      loopNoteId != null &&
+      store.db
+        .prepare("SELECT 1 FROM video_notes WHERE journey=? AND loop_note_id=?")
+        .get(journey, loopNoteId)
+    )
+      throw new Fault(
+        409,
+        `Another note here already came from Loop note ${loopNoteId}`,
+      );
     const id = randomUUID();
     store.db
       .prepare(
-        "INSERT INTO video_notes(id,journey,version_id,step_id,recorder_id,recorder_name,media_id,medium,status,content_version,created_at) VALUES(?,?,?,?,?,?,?,?,'unprocessed',1,?)",
+        "INSERT INTO video_notes(id,journey,version_id,step_id,recorder_id,recorder_name,media_id,medium,status,content_version,created_at,loop_note_id) VALUES(?,?,?,?,?,?,?,?,'unprocessed',1,?,?)",
       )
       .run(
         id,
@@ -270,6 +299,7 @@ export function createNote(
         input.mediaId,
         input.medium,
         now,
+        loopNoteId,
       );
     for (const p of input.pins) insertPin(store, journey, id, p);
     appendFeed(store, journey, "note", { noteId: id, contentVersion: 1 }, now);
@@ -482,18 +512,21 @@ export function transcriptExcerpt(
 
 /**
  * Called inside `Store.request`: takes every decided pin of the journey that no earlier
- * request consumed. Approved and changed pins become request items; dropped pins resolve;
- * undecided pins stay open.
+ * request consumed, plus the pins of `superseded` requests (unanswered ones the new request
+ * replaces), so none are stranded. Approved and changed pins become request items; dropped
+ * pins resolve; undecided pins stay open. Pins of a request a round answered stay with it.
  */
 export function consumeDecidedPins(
   store: Store,
   journey: string,
   requestId: string,
+  superseded: ReadonlySet<string> = new Set(),
 ): RequestPin[] {
   const items: RequestPin[] = [];
   for (const note of listNotes(store, journey)) {
     for (const p of note.pins) {
-      if (p.requestId || !p.decision) continue;
+      if (!p.decision) continue;
+      if (p.requestId && !superseded.has(p.requestId)) continue;
       store.db
         .prepare("UPDATE pins SET request_id=? WHERE id=?")
         .run(requestId, p.id);

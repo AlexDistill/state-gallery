@@ -315,6 +315,62 @@ test(
 );
 
 test(
+  "a pushed note keeps the pusher's Loop note id, and sync content and the notes list return it",
+  run(async (t) => {
+    await t.link(t.alex.token);
+    await t.link(t.amadeo.token);
+    const p = await t.push(t.alex.token, {
+      notes: [
+        {
+          ...(await t.pushedNote(t.alex.token, "e-loop", ["l1"])),
+          loopNoteId: "note_alex1",
+        },
+      ],
+    });
+    assert.equal(p.status, 200, JSON.stringify(p.body));
+    const noteId = p.body.results[0].noteId as string;
+    const c = await t.call(`/journeys/${t.j.id}/sync/content?notes=${noteId}`, {
+      token: t.amadeo.token,
+    });
+    assert.equal(c.body.notes[0].loopNoteId, "note_alex1");
+    const list = await t.call(`/journeys/${t.j.id}/notes`, {
+      token: t.alex.token,
+    });
+    assert.equal(list.body.notes[0].loopNoteId, "note_alex1");
+
+    // The same push again returns the stored result and makes nothing new.
+    const again = await t.push(t.alex.token, {
+      notes: [
+        {
+          ...(await t.pushedNote(t.alex.token, "e-loop", ["l1"])),
+          loopNoteId: "note_alex1",
+        },
+      ],
+    });
+    assert.equal(again.body.results[0].noteId, noteId);
+    assert.equal(listNotes(t.store, t.j.id).length, 1);
+
+    // A browser recording has no Loop note id.
+    const media = await t.recording(t.amadeo.token);
+    const g = await t.galleryNote(t.amadeo, media, ["b1"]);
+    assert.equal(g.body.loopNoteId, null);
+
+    // Another note can't claim a Loop note id already in the journey.
+    const taken = await t.push(t.amadeo.token, {
+      notes: [
+        {
+          ...(await t.pushedNote(t.amadeo.token, "e-claim", ["c1"])),
+          loopNoteId: "note_alex1",
+        },
+      ],
+    });
+    assert.equal(taken.status, 409);
+    assert.match(taken.body.error.message, /already/);
+    assert.equal(listNotes(t.store, t.j.id).length, 2);
+  }),
+);
+
+test(
   "a losing pin decision returns 409 with the winning decision, and history keeps both",
   run(async (t) => {
     await t.link(t.alex.token);

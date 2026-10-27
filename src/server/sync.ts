@@ -98,6 +98,8 @@ export const pushSchema = z.object({
     .array(
       z.object({
         eventId,
+        /** The pushing member's Loop note id; the gallery returns it on the note. */
+        loopNoteId: id.optional(),
         versionId: ref,
         stepId: z.string().min(1).max(100),
         medium: z.enum(["audio", "video"]),
@@ -616,6 +618,7 @@ export function push(
           },
           actor,
           now,
+          n.loopNoteId ?? null,
         );
         putFiles(store, journey, memberId, note.id, n.files, now);
         if (n.processing)

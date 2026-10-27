@@ -236,15 +236,55 @@ test("a request with two approved, one dropped, one undecided pin", () => {
     feedSince(store, j.id, before).map((e) => [e.kind, e.ids]),
     [["request", { requestId: q.id }]],
   );
-  // a later request does not repeat consumed pins; the undecided pin still can be decided
+  // a decision cannot be changed once a request carries it
+  assert.throws(() => decide("a1", "dropped"), /request/);
+  // a later request does not repeat pins a round already answered; the undecided pin still can be decided
+  const v2 = store.submit(
+    j.id,
+    manifest(v1.id, q.id),
+    { "home.png": image },
+    "v2",
+  );
   decide("u1", "approved");
-  const q2 = store.request(j.id, v1.id, store.get(j.id).generation);
+  const q2 = store.request(j.id, v2.id, store.get(j.id).generation);
   assert.deepEqual(
     q2.pins!.map((p) => p.pinId),
     ["u1"],
   );
-  // a decision cannot be changed once a request carries it
-  assert.throws(() => decide("a1", "dropped"), /request/);
+  assert.equal(
+    getNote(store, j.id, n.id).pins.find((p) => p.id === "a1")!.requestId,
+    q.id,
+    "the answered request keeps its pins",
+  );
+  store.close();
+});
+
+test("a second request on the same version carries the first one's decided pins, so none are stranded", () => {
+  const { store, j, v1, note, decide } = setup();
+  const n = note(v1.id, ["a1", "a2", "d1", "u1"]);
+  decide("a1", "approved");
+  decide("a2", "approved");
+  decide("d1", "dropped");
+  const q = store.request(j.id, v1.id, store.get(j.id).generation);
+  decide("u1", "approved");
+  const q2 = store.request(j.id, v1.id, store.get(j.id).generation);
+  assert.deepEqual(q2.pins!.map((p) => p.pinId).sort(), ["a1", "a2", "u1"]);
+  const pins = getNote(store, j.id, n.id).pins;
+  for (const id of ["a1", "a2", "d1", "u1"])
+    assert.equal(
+      pins.find((p) => p.id === id)!.requestId,
+      q2.id,
+      `${id} now belongs to the newer request`,
+    );
+  assert.notEqual(q.id, q2.id);
+  // the newer request can be answered with responses to the carried pins
+  const v2 = store.submit(
+    j.id,
+    { ...manifest(v1.id, q2.id), responses: { a1: "Done" } },
+    { "home.png": image },
+    "v2",
+  );
+  assert.equal(store.get(j.id).requests.at(-1)!.successorId, v2.id);
   store.close();
 });
 
@@ -487,4 +527,27 @@ test("domain writes nest inside one push transaction and roll back together", ()
   assert.equal(latestSeq(store, j.id), seq);
   assert.equal(listNotes(store, j.id).length, 0);
   store.close();
+});
+
+test("a database made before Loop note ids gains the column on open", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const path = join(mkdtempSync(join(tmpdir(), "sg-migrate-")), "g.db");
+  const old = new DatabaseSync(path);
+  old.exec(
+    "CREATE TABLE video_notes(id TEXT PRIMARY KEY,journey TEXT NOT NULL,version_id TEXT NOT NULL,step_id TEXT NOT NULL,recorder_id TEXT,recorder_name TEXT NOT NULL,media_id TEXT,medium TEXT NOT NULL,status TEXT NOT NULL,transcript TEXT,summary TEXT,content_version INTEGER NOT NULL,created_at INTEGER NOT NULL);" +
+      "INSERT INTO video_notes VALUES('n0','j0','v0','home',NULL,'Owner',NULL,'audio','retracted',NULL,NULL,2,0);",
+  );
+  old.close();
+  const store = new Store(path);
+  const cols = store.db
+    .prepare("SELECT name FROM pragma_table_info('video_notes')")
+    .all()
+    .map((r) => r.name);
+  assert.ok(cols.includes("loop_note_id"));
+  assert.equal(getNote(store, "j0", "n0").loopNoteId, null);
+  store.close();
+  new Store(path).close();
 });
