@@ -6,6 +6,7 @@ import { Fault, type Store } from "./domain.js";
 import {
   getMedia,
   referenceMedia,
+  uploadedBy,
   setMediaRestricted,
   sweepMedia,
   type Media,
@@ -62,9 +63,13 @@ const linkSchema = z.object({
     .regex(/^shared:.{1,200}$/, "Only a shared: bed can link to the gallery"),
   confidential: z.boolean(),
 });
-/** Folder files a push may carry. Binary ones name uploaded media; text ones carry their text. */
+/**
+ * Folder files a push may carry. Binary ones name uploaded media; text ones carry their text.
+ * Loop names key frames by millisecond offset (up to 86 400 000, a day) and the marked
+ * version image `frames/version.png`.
+ */
 const FILE_NAME =
-  /^(recording|audio|transcript|readback|pins|pointer|frames\/\d{1,5}\.(png|jpg))$/;
+  /^(recording|audio|transcript|readback|pins|pointer|frames\/(\d{1,8}\.(png|jpg)|version\.png))$/;
 const TEXT_FILES = new Set(["transcript", "readback", "pins", "pointer"]);
 /** The pointer track a gallery recording carries: positions on the image, timed from recorder start. */
 const pointerSchema = z
@@ -211,7 +216,7 @@ export function link(
   });
 }
 
-/** Media a member may attach: uploaded to this journey by that member, of the expected kind. */
+/** Media a member may attach: uploaded to this journey by that member (first or as a repeat), of the expected kind. */
 function ownMedia(
   store: Store,
   journey: string,
@@ -225,7 +230,7 @@ function ownMedia(
       400,
       `Media ${mediaId} is not uploaded to this journey. Upload it, then push again.`,
     );
-  if (m.uploader !== memberId)
+  if (!uploadedBy(store, m.id, memberId))
     throw new Fault(403, `Media ${mediaId} was uploaded by another member`);
   const ok =
     kind === "recording"

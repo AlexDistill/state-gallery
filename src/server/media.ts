@@ -42,7 +42,9 @@ const ready = new WeakSet<Store>();
 function table(store: Store) {
   if (ready.has(store)) return store.db;
   store.db.exec(
-    `CREATE TABLE IF NOT EXISTS media(id TEXT PRIMARY KEY,journey TEXT NOT NULL,sha256 TEXT NOT NULL,mime TEXT NOT NULL,size INTEGER NOT NULL,path TEXT NOT NULL,uploader TEXT NOT NULL,uploaded_at INTEGER NOT NULL,restricted_to TEXT,referenced_at INTEGER,width INTEGER,height INTEGER,UNIQUE(journey,sha256));`,
+    `CREATE TABLE IF NOT EXISTS media(id TEXT PRIMARY KEY,journey TEXT NOT NULL,sha256 TEXT NOT NULL,mime TEXT NOT NULL,size INTEGER NOT NULL,path TEXT NOT NULL,uploader TEXT NOT NULL,uploaded_at INTEGER NOT NULL,restricted_to TEXT,referenced_at INTEGER,width INTEGER,height INTEGER,UNIQUE(journey,sha256));
+CREATE TABLE IF NOT EXISTS media_uploaders(media_id TEXT NOT NULL REFERENCES media(id) ON DELETE CASCADE,member TEXT NOT NULL,PRIMARY KEY(media_id,member));
+INSERT OR IGNORE INTO media_uploaders SELECT id,uploader FROM media;`,
   );
   ready.add(store);
   return store.db;
@@ -72,6 +74,18 @@ export function defaultMediaDir(store: Store) {
     ? join(dirname(file), "media")
     : join(tmpdir(), `state-gallery-media-${process.pid}`);
 }
+
+/** Whether `member` uploaded these bytes: first, or as a repeat upload of the same file. */
+export function uploadedBy(store: Store, mediaId: string, member: string) {
+  return !!table(store)
+    .prepare("SELECT 1 FROM media_uploaders WHERE media_id=? AND member=?")
+    .get(mediaId, member);
+}
+
+const addUploader = (store: Store, mediaId: string, member: string) =>
+  table(store)
+    .prepare("INSERT OR IGNORE INTO media_uploaders VALUES(?,?)")
+    .run(mediaId, member);
 
 export function getMedia(store: Store, id: string): Media | null {
   const r = table(store).prepare("SELECT * FROM media WHERE id=?").get(id);
@@ -141,8 +155,8 @@ export const baseMime = (header: string | undefined) =>
 const tooLarge = () => new Fault(413, "Media must be 500 MB or smaller");
 
 /**
- * Streams an upload to a temp file, then keeps one file per journey and sha256.
- * Returns the stored media and whether it already existed.
+ * Streams an upload to a temp file, then keeps one file per journey and sha256,
+ * recording every member who uploaded those bytes. Returns the stored media and whether it already existed.
  */
 export async function saveUpload(
   store: Store,
@@ -206,6 +220,7 @@ export async function saveUpload(
         now,
         String(found.id),
       );
+      addUploader(store, String(found.id), input.uploader);
       return { media: getMedia(store, String(found.id))!, existing: true };
     }
     const path = join("files", input.journey, sha256);
@@ -232,6 +247,7 @@ export async function saveUpload(
     const stored = db
       .prepare("SELECT * FROM media WHERE journey=? AND sha256=?")
       .get(input.journey, sha256)!;
+    addUploader(store, String(stored.id), input.uploader);
     return { media: row(stored), existing: String(stored.id) !== id };
   } finally {
     rmSync(tmp, { force: true });

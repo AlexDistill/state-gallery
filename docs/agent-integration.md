@@ -95,9 +95,9 @@ Members record video notes on a version step; each click is a pin with a propose
   - An event id already applied is skipped and its first result returned, so a retried push changes nothing.
   - Any failure rolls back the whole push.
   - Identity fields in the payload are ignored. The recorder, decider and author are the token's member.
-  - Folder files must be named `recording`, `audio`, `frames/<n>.png` or `frames/<n>.jpg` (uploaded media, by id), or `transcript`, `readback`, `pins` or `pointer` (sent as text). Any other name is refused.
+  - Folder files must be named `recording`, `audio`, `frames/<ms>.png` or `frames/<ms>.jpg` (a key frame named by its offset in milliseconds, up to 8 digits), `frames/version.png` (uploaded media, by id), or `transcript`, `readback`, `pins` or `pointer` (sent as text). Any other name is refused.
   - `processing.transcript` may be plain text or JSON `[{startMs, endMs, text}]` segments. With segments, each pin in a revision request carries `transcriptExcerpt`: the speech within 5 seconds of its `atMs`.
-  - Media must be uploaded to this journey by the pushing member; a push naming missing media is refused.
+  - Media must be uploaded to this journey by the pushing member; a push naming missing media is refused. Identical bytes are stored once, and every member who uploads them may attach them, so two members can push the same frame or image. A member who never uploaded the bytes is refused with 403.
   - A pushed decision is checked against the pin's current decision, not the journey generation.
   - A turn with image outputs becomes the next version only when `parentVersionId` is the journey's current version. Otherwise it is kept as a turn with `notAVersionReason`; pull and redo it. A turn answering a revision request sends that `requestId` with `responses` keyed by the request's pin ids, and the request's successor is set.
   - Only a note's recorder may retract it; any other member's retraction fails the push. Retraction deletes the note's pins and the media no other note uses.

@@ -730,3 +730,61 @@ test(
     assert.equal(getMedia(t.store, a.files[0].mediaId!), null);
   }),
 );
+
+test(
+  "a pushed note may carry frames named by millisecond offset and the marked version frame",
+  run(async (t) => {
+    const n = await t.pushedNote(t.alex.token, "e1", ["p1"]);
+    const late = await t.upload(t.alex.token, await png("#123"), "image/png");
+    const version = await t.upload(
+      t.alex.token,
+      await png("#456"),
+      "image/png",
+    );
+    n.files.push(
+      { name: "frames/123456.png", mediaId: late } as any,
+      { name: "frames/86400000.png", mediaId: late } as any,
+      { name: "frames/version.png", mediaId: version } as any,
+    );
+    const p = await t.push(t.alex.token, { notes: [n] });
+    assert.equal(p.status, 200, JSON.stringify(p.body));
+
+    for (const name of [
+      "frames/123456789.png",
+      "frames/version.jpg",
+      "frames/1.png.part.png",
+    ]) {
+      const bad = await t.pushedNote(t.alex.token, `e-${name}`, ["p2"]);
+      bad.files.push({ name, mediaId: late } as any);
+      const r = await t.push(t.alex.token, { notes: [bad] });
+      assert.equal(r.status, 400, name);
+    }
+  }),
+);
+
+test(
+  "members who each uploaded the same image may both attach it; one who never uploaded it may not",
+  run(async (t) => {
+    const bytes = await png("#0a0");
+    const fromAlex = await t.upload(t.alex.token, bytes, "image/png");
+    const fromAmadeo = await t.upload(t.amadeo.token, bytes, "image/png");
+    assert.equal(fromAlex, fromAmadeo);
+
+    const a = await t.pushedNote(t.alex.token, "e1", ["p1"]);
+    a.files.push({ name: "frames/1000.png", mediaId: fromAlex } as any);
+    const pa = await t.push(t.alex.token, { notes: [a] });
+    assert.equal(pa.status, 200, JSON.stringify(pa.body));
+
+    const b = await t.pushedNote(t.amadeo.token, "e2", ["p2"]);
+    b.files.push({ name: "frames/1000.png", mediaId: fromAmadeo } as any);
+    const pb = await t.push(t.amadeo.token, { notes: [b] });
+    assert.equal(pb.status, 200, JSON.stringify(pb.body));
+
+    const bea = t.join("Bea");
+    const c = await t.pushedNote(bea.token, "e3", ["p3"]);
+    c.files.push({ name: "frames/1000.png", mediaId: fromAlex } as any);
+    const pc = await t.push(bea.token, { notes: [c] });
+    assert.equal(pc.status, 403, JSON.stringify(pc.body));
+    assert.equal(listNotes(t.store, t.j.id).length, 2);
+  }),
+);
