@@ -186,11 +186,10 @@ export function link(
         "SELECT confidential, changed_by FROM journey_sync WHERE journey=?",
       )
       .get(journey);
-    const heldByOther =
-      !!current &&
-      !!Number(current.confidential) &&
-      current.changed_by !== memberId;
-    if (l.confidential || !heldByOther)
+    const raised = !!current && !!Number(current.confidential);
+    // Re-raising a held flag keeps the original raiser, so nobody can take
+    // it over and then clear it.
+    if (l.confidential ? !raised : !raised || current.changed_by === memberId)
       setConfidential(store, journey, l.confidential, memberId, now);
     const g = store.markLinkedLoop(memberId, now)!;
     return {

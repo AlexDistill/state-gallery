@@ -210,6 +210,12 @@ test(
     assert.equal(p.status, 409);
     assert.equal(listNotes(t.store, t.j.id).length, 0);
 
+    // Re-raising and then clearing does not take the flag over.
+    assert.equal((await t.link(t.amadeo.token, true)).status, 200);
+    assert.equal((await t.link(t.amadeo.token, false)).status, 200);
+    poll = await t.call(`/journeys/${t.j.id}`, { token: t.alex.token });
+    assert.equal(poll.body.confidential, true);
+
     assert.equal((await t.link(t.alex.token, false)).status, 200);
     poll = await t.call(`/journeys/${t.j.id}`, { token: t.alex.token });
     assert.equal(poll.body.confidential, false);
