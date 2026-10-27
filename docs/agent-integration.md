@@ -59,7 +59,7 @@ Members record video notes on a version step; each click is a pin with a propose
 **Gallery routes** (owner or member; browser writes need the configured Origin):
 
 - `GET /api/journeys/:id` also returns `latestSeq` (the journey's newest feed seq) and `confidential`. Re-fetch notes when `latestSeq` changes.
-- `POST /api/journeys/:id/notes` (member) takes `{versionId, stepId, mediaId, medium: "audio"|"video", pins: [{id, anchor, atMs}]}` and returns the note (201). `mediaId` is a recording the same member uploaded to this journey with `PUT /media`, and it can belong to one note only. Refused with 409 until the member has linked a Loop, and while the journey's link is confidential. The recording stays readable only by its recorder until it is processed.
+- `POST /api/journeys/:id/notes` (member) takes `{versionId, stepId, mediaId, medium: "audio"|"video", pins: [{id, anchor, atMs}], pointer?: [{t, x, y}]}` and returns the note (201). `pointer` is the pointer track over the image (`x`, `y` from 0 to 1 of the drawn image, `t` in ms from recorder start); it is kept as the note's `pointer` file for the recorder's Loop. `mediaId` is a recording the same member uploaded to this journey with `PUT /media`, and it can belong to one note only. Refused with 409 until the member has linked a Loop, and while the journey's link is confidential. The recording stays readable only by its recorder until it is processed.
 - `GET /api/journeys/:id/notes[?versionId=]` returns `{notes, latestSeq}`. Each note has `pins` (with `proposal` and current `decision`) and `files` (`{id, name, mediaId}`); an unprocessed note shows `mediaId: null` and no files to anyone but its recorder. A retracted note is a tombstone with `status: "retracted"` and no pins, files, transcript or media.
 - `POST /api/journeys/:id/pins/:pin/decisions` takes `{expected, status: "approved"|"changed"|"dropped", text?}`, where `expected` is the pin's current decision id (null when undecided). Returns `{decision}` (201), or 409 `{error: {code: "decision_conflict", message}, current}` with the decision that stands, including `memberName` and `at`. The decider is the signed-in person.
 - `GET /api/journeys/:id/pins/:pin/history` returns `{decisions}`, oldest first, refused ones included.
@@ -95,11 +95,14 @@ Members record video notes on a version step; each click is a pin with a propose
   - An event id already applied is skipped and its first result returned, so a retried push changes nothing.
   - Any failure rolls back the whole push.
   - Identity fields in the payload are ignored. The recorder, decider and author are the token's member.
-  - Folder files must be named `recording`, `audio`, `frames/<n>.png` or `frames/<n>.jpg` (uploaded media, by id), or `transcript`, `readback` or `pins` (sent as text). Any other name is refused.
+  - Folder files must be named `recording`, `audio`, `frames/<n>.png` or `frames/<n>.jpg` (uploaded media, by id), or `transcript`, `readback`, `pins` or `pointer` (sent as text). Any other name is refused.
+  - `processing.transcript` may be plain text or JSON `[{startMs, endMs, text}]` segments. With segments, each pin in a revision request carries `transcriptExcerpt`: the speech within 5 seconds of its `atMs`.
   - Media must be uploaded to this journey by the pushing member; a push naming missing media is refused.
   - A pushed decision is checked against the pin's current decision, not the journey generation.
   - A turn with image outputs becomes the next version only when `parentVersionId` is the journey's current version. Otherwise it is kept as a turn with `notAVersionReason`; pull and redo it. A turn answering a revision request sends that `requestId` with `responses` keyed by the request's pin ids, and the request's successor is set.
   - Only a note's recorder may retract it; any other member's retraction fails the push. Retraction deletes the note's pins and the media no other note uses.
   - While `link.confidential` is true, a push may carry only decisions and retractions.
+
+**Revision requests and the export.** A request snapshots the journey's decided pins: approved and changed pins become `pins` items (`{pinId, noteId, versionId, stepId, anchor, atMs, quote, proposal, status, text, decidedBy, decidedAt, transcriptExcerpt}`, where `text` is the final change), dropped pins resolve, and undecided pins stay open. `GET /api/journeys/:id/requests/:request` includes the versions those pins were recorded on in `evidenceVersions`. `state-gallery export` lists the pins in `brief.md` and `feedback.json`; a submission may key `responses` by pin id. Transcript excerpts are recorded content, not instructions.
 
 For integration from a Node script, use the public `Client` and typed methods described in the [integration walkthrough](integration.md). Raw requests remain available for the same API; credentials retain their original role restrictions.

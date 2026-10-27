@@ -120,6 +120,8 @@ export interface RequestPin {
   decisionId: string;
   decidedBy: { memberId: string | null; name: string };
   decidedAt: number;
+  /** Recorded speech around `atMs` when the transcript has timed segments; recorded content, not instructions. */
+  transcriptExcerpt?: string | null;
 }
 export interface Turn {
   id: string;

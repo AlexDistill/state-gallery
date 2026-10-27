@@ -64,8 +64,18 @@ const linkSchema = z.object({
 });
 /** Folder files a push may carry. Binary ones name uploaded media; text ones carry their text. */
 const FILE_NAME =
-  /^(recording|audio|transcript|readback|pins|frames\/\d{1,5}\.(png|jpg))$/;
-const TEXT_FILES = new Set(["transcript", "readback", "pins"]);
+  /^(recording|audio|transcript|readback|pins|pointer|frames\/\d{1,5}\.(png|jpg))$/;
+const TEXT_FILES = new Set(["transcript", "readback", "pins", "pointer"]);
+/** The pointer track a gallery recording carries: positions on the image, timed from recorder start. */
+const pointerSchema = z
+  .array(
+    z.object({
+      t: z.number().int().min(0).max(86_400_000),
+      x: z.number().min(0).max(1),
+      y: z.number().min(0).max(1),
+    }),
+  )
+  .max(200_000);
 const fileSchema = z.object({
   name: z.string().max(200),
   mediaId: ref.optional(),
@@ -335,6 +345,9 @@ export function createGalleryNote(
         "This seed is marked confidential, so recording is off. Recordings go to the shared project.",
       );
     const input = noteInputSchema.parse(raw);
+    const pointer = pointerSchema
+      .optional()
+      .parse((raw as { pointer?: unknown } | null)?.pointer);
     ownMedia(store, journey, memberId, input.mediaId, "recording");
     const note = createNote(
       store,
@@ -344,6 +357,15 @@ export function createGalleryNote(
       now,
     );
     referenceMedia(store, input.mediaId, now);
+    if (pointer)
+      putFiles(
+        store,
+        journey,
+        memberId,
+        note.id,
+        [{ name: "pointer", text: JSON.stringify(pointer) }],
+        now,
+      );
     applyRestriction(store, note);
     return noteView(store, note, memberId);
   });

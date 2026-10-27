@@ -412,6 +412,51 @@ export function decidePin(
   });
 }
 
+const EXCERPT_WINDOW_MS = 5000;
+const EXCERPT_MAX = 1000;
+/**
+ * The recorded words around `atMs`. A transcript stored as JSON `[{startMs, endMs, text}]`
+ * segments yields the segments within 5 seconds of the pin (or the nearest one); plain text
+ * has no timing, so it yields null.
+ */
+export function transcriptExcerpt(
+  transcript: string | null,
+  atMs: number,
+): string | null {
+  if (!transcript) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(transcript);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  const segments = parsed.filter(
+    (s): s is { startMs: number; endMs: number; text: string } =>
+      !!s &&
+      typeof s.startMs === "number" &&
+      typeof s.endMs === "number" &&
+      typeof s.text === "string",
+  );
+  if (!segments.length) return null;
+  let near = segments.filter(
+    (s) =>
+      s.endMs >= atMs - EXCERPT_WINDOW_MS &&
+      s.startMs <= atMs + EXCERPT_WINDOW_MS,
+  );
+  if (!near.length) {
+    const gap = (s: (typeof segments)[number]) =>
+      Math.min(Math.abs(s.startMs - atMs), Math.abs(s.endMs - atMs));
+    near = [segments.reduce((a, b) => (gap(b) < gap(a) ? b : a))];
+  }
+  const text = near
+    .map((s) => s.text.trim())
+    .filter(Boolean)
+    .join(" ");
+  if (!text) return null;
+  return text.length > EXCERPT_MAX ? `${text.slice(0, EXCERPT_MAX)}…` : text;
+}
+
 /**
  * Called inside `Store.request`: takes every decided pin of the journey that no earlier
  * request consumed. Approved and changed pins become request items; dropped pins resolve;
@@ -447,6 +492,7 @@ export function consumeDecidedPins(
           name: p.decision.memberName,
         },
         decidedAt: p.decision.at,
+        transcriptExcerpt: transcriptExcerpt(note.transcript, p.atMs),
       });
     }
   }

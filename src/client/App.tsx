@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api } from "./api.js";
 import type { Anchor } from "../shared/schema.js";
+import type { VideoNote } from "../shared/model.js";
+import { RecorderPanel, useRecorder } from "./Recorder.js";
+import { NotesPanel, stepPins } from "./PinDecisions.js";
+import { Turns } from "./Turns.js";
 const asset = (j: string, s: any) => `/api/journeys/${j}/assets/${s.assetId}`;
 function Input({ label, ...props }: any) {
   return (
@@ -21,7 +25,9 @@ export function App() {
     [editor, setEditor] = useState(false),
     [share, setShare] = useState(""),
     [grants, setGrants] = useState<any[]>([]),
-    [agentToken, setAgentToken] = useState("");
+    [agentToken, setAgentToken] = useState(""),
+    [notes, setNotes] = useState<VideoNote[]>([]),
+    [view, setView] = useState<"journey" | "turns">("journey");
   const [token] = useState(
     () => new URLSearchParams(location.hash.slice(1)).get("review") ?? "",
   );
@@ -33,6 +39,9 @@ export function App() {
     [memberToken, setMemberToken] = useState(""),
     [newMemberToken, setNewMemberToken] = useState("");
   const owner = session?.role === "owner";
+  const memberSession = session?.role === "member";
+  // Video notes, turns and the shelf are for the owner and members only.
+  const seesNotes = owner || memberSession;
   const v =
     journey?.versions.find((v: any) => v.id === versionId) ??
     journey?.versions.at(-1);
@@ -52,6 +61,8 @@ export function App() {
         setScreen("");
         setVersionId("");
         setEditor(false);
+        setView("journey");
+        setNotes([]);
       }
       if (owner) setGrants(await api(`/journeys/${id}/grants`));
     }
@@ -81,6 +92,14 @@ export function App() {
       .catch(() => {})
       .finally(() => setLoaded(true));
   }, []);
+  const loadNotes = async (id = journey?.id) => {
+    if (!id || !seesNotes) return;
+    setNotes((await api(`/journeys/${id}/notes`)).notes);
+  };
+  // The journey poll carries the feed's latestSeq; notes are re-fetched only when it moves.
+  useEffect(() => {
+    loadNotes().catch((e) => setError(e.message));
+  }, [journey?.id, journey?.latestSeq, seesNotes]);
   useEffect(() => {
     if (!session || !journey) return;
     const timer = setInterval(() => {
@@ -372,22 +391,47 @@ export function App() {
               <>
                 <nav className="view-nav">
                   <button
-                    className={!step ? "selected" : "ghost"}
-                    onClick={() => setScreen("")}
+                    className={
+                      !step && view === "journey" ? "selected" : "ghost"
+                    }
+                    onClick={() => {
+                      setScreen("");
+                      setView("journey");
+                    }}
                   >
                     Journey overview
                   </button>
+                  {seesNotes && (
+                    <button
+                      className={view === "turns" ? "selected" : "ghost"}
+                      onClick={() => {
+                        setScreen("");
+                        setView("turns");
+                      }}
+                    >
+                      Turns
+                    </button>
+                  )}
                   {v.steps.map((s: any, i: number) => (
                     <button
                       key={s.id}
-                      className={screen === s.id ? "selected" : "ghost"}
-                      onClick={() => setScreen(s.id)}
+                      className={
+                        view === "journey" && screen === s.id
+                          ? "selected"
+                          : "ghost"
+                      }
+                      onClick={() => {
+                        setScreen(s.id);
+                        setView("journey");
+                      }}
                     >
                       {i + 1}. {s.title}
                     </button>
                   ))}
                 </nav>
-                {step ? (
+                {view === "turns" && seesNotes ? (
+                  <Turns journey={journey} notes={notes} onError={setError} />
+                ) : step ? (
                   <ScreenReview
                     key={`${v.id}-${step.id}`}
                     journey={journey}
@@ -395,6 +439,11 @@ export function App() {
                     step={step}
                     previous={previous}
                     owner={owner}
+                    session={session}
+                    notes={notes.filter(
+                      (n) => n.versionId === v.id && n.stepId === step.id,
+                    )}
+                    loadNotes={loadNotes}
                     refresh={refresh}
                     action={action}
                   />
@@ -466,6 +515,39 @@ export function App() {
                 )}
               </>
             )}
+            {memberSession && v && (
+              <section className="panel">
+                <h2>Revision request</h2>
+                <p>
+                  Sends the current version's decided pins to the next turn.
+                  Dropped pins resolve; undecided pins stay open.
+                </p>
+                <button
+                  disabled={v.id !== journey.currentId}
+                  onClick={() =>
+                    action(async () => {
+                      await api(`/journeys/${journey.id}/requests`, {
+                        versionId: v.id,
+                        generation: journey.generation,
+                      });
+                      await refresh();
+                      await loadNotes();
+                    })
+                  }
+                >
+                  Request revision
+                </button>
+                {journey.requests.length > 0 && (
+                  <p className="small">
+                    Latest request: {journey.requests.at(-1).pins?.length ?? 0}{" "}
+                    decided pins ·{" "}
+                    {journey.requests.at(-1).successorId
+                      ? "revision received"
+                      : "waiting for the next turn"}
+                  </p>
+                )}
+              </section>
+            )}
             {owner && (
               <section className="owner-panel">
                 <div className="panel">
@@ -484,6 +566,7 @@ export function App() {
                             generation: journey.generation,
                           });
                           await refresh();
+                          await loadNotes();
                         })
                       }
                     >
@@ -932,15 +1015,27 @@ function ScreenReview({
   step,
   previous,
   owner,
+  session,
+  notes,
+  loadNotes,
   refresh,
   action,
 }: any) {
   const [tool, setTool] = useState<"screen" | "point" | "region">("screen"),
     [anchor, setAnchor] = useState<Anchor>({ kind: "screen" }),
     [text, setText] = useState(""),
-    [compare, setCompare] = useState(false);
+    [compare, setCompare] = useState(false),
+    [openPin, setOpenPin] = useState<string | null>(null);
   const start = useRef<{ x: number; y: number } | null>(null);
   const image = useRef<HTMLDivElement>(null);
+  const img = useRef<HTMLImageElement>(null);
+  const rec = useRecorder();
+  const recording = rec.phase === "recording";
+  // Only the recorder's own Loop can process a recording, and a confidential seed records nothing.
+  const member = session?.role === "member";
+  const canRecord = member && !!session.linkedLoopAt && !journey.confidential;
+  const draftPins = rec.phase === "idle" ? [] : rec.pins;
+  const pins = stepPins(notes);
   const coords = (e: React.PointerEvent) => {
     const r = image.current!.getBoundingClientRect();
     return {
@@ -1021,15 +1116,41 @@ function ScreenReview({
                 ? "Click the image to place your pin."
                 : "Drag across the image to mark an area."}
           </p>
+          {step.assetId &&
+            (canRecord ? (
+              <RecorderPanel
+                rec={rec}
+                journeyId={journey.id}
+                versionId={version.id}
+                stepId={step.id}
+                onUploaded={() => action(() => loadNotes())}
+              />
+            ) : (
+              member &&
+              !session.linkedLoopAt &&
+              !journey.confidential && (
+                <p className="small recorder-hint">
+                  Link Loop to record notes here
+                </p>
+              )
+            ))}
           {step.assetId ? (
             <div
               ref={image}
-              className={`annotated ${tool}`}
+              className={`annotated ${recording ? "recording" : tool}`}
               style={{
                 maxWidth: step.width ?? step.viewport.width,
                 marginInline: "auto",
               }}
+              onPointerMove={(e) => {
+                if (recording && img.current)
+                  rec.pointer.onPointerMove(e, img.current);
+              }}
               onPointerDown={(e) => {
+                if (recording) {
+                  if (img.current) rec.pointer.onPointerDown(e, img.current);
+                  return;
+                }
                 if (tool === "screen") return;
                 start.current = coords(e);
                 e.currentTarget.setPointerCapture(e.pointerId);
@@ -1037,6 +1158,10 @@ function ScreenReview({
                   setAnchor({ kind: "point", ...start.current });
               }}
               onPointerUp={(e) => {
+                if (recording) {
+                  if (img.current) rec.pointer.onPointerUp(e, img.current);
+                  return;
+                }
                 if (tool === "region" && start.current) {
                   const end = coords(e),
                     s = start.current;
@@ -1055,6 +1180,7 @@ function ScreenReview({
               }}
             >
               <img
+                ref={img}
                 draggable={false}
                 src={asset(journey.id, step)}
                 alt={step.title}
@@ -1062,7 +1188,29 @@ function ScreenReview({
               {comments.map((c: any, i: number) => (
                 <Marker anchor={c.anchor} key={c.id} label={String(i + 1)} />
               ))}
-              <Marker anchor={anchor} label="+" draft />
+              {draftPins.length === 0 &&
+                pins.map(({ pin }: any, i: number) => (
+                  <Marker
+                    anchor={pin.anchor}
+                    key={pin.id}
+                    label={String(i + 1)}
+                    kind="Pin"
+                    className={`note-pin ${openPin === pin.id ? "open" : ""}`}
+                    onOpen={() =>
+                      setOpenPin(openPin === pin.id ? null : pin.id)
+                    }
+                  />
+                ))}
+              {draftPins.map((p, i) => (
+                <Marker
+                  anchor={p.anchor}
+                  key={p.id}
+                  label={String(i + 1)}
+                  kind="Recording pin"
+                  className="recording-pin"
+                />
+              ))}
+              {!recording && <Marker anchor={anchor} label="+" draft />}
             </div>
           ) : (
             <div className="gap">
@@ -1073,6 +1221,17 @@ function ScreenReview({
           <p className="small">{step.provenance}</p>
         </div>
         <aside className="discussion">
+          <NotesPanel
+            journeyId={journey.id}
+            notes={notes}
+            selected={openPin}
+            onSelect={setOpenPin}
+            onChanged={async () => {
+              // A decision bumps the journey generation; refresh it so a revision request isn't stale.
+              await refresh();
+              await loadNotes();
+            }}
+          />
           <h3>Discussion · {comments.length}</h3>
           <form
             onSubmit={(e) => {
@@ -1128,12 +1287,23 @@ function ScreenReview({
     </section>
   );
 }
-function Marker({ anchor, label, draft = false }: any) {
+function Marker({
+  anchor,
+  label,
+  draft = false,
+  kind = "Comment",
+  className = "",
+  onOpen,
+}: any) {
   if (anchor.kind === "screen") return null;
+  const Tag = onOpen ? "button" : "span";
   return (
-    <span
-      aria-label={`${draft ? "Draft" : "Comment"} ${label} ${anchor.kind}`}
-      className={`marker ${anchor.kind} ${draft ? "draft" : ""}`}
+    <Tag
+      aria-label={`${draft ? "Draft" : kind} ${label} ${anchor.kind}`}
+      className={`marker ${anchor.kind} ${draft ? "draft" : ""} ${className}`}
+      onPointerDown={onOpen ? (e: any) => e.stopPropagation() : undefined}
+      onPointerUp={onOpen ? (e: any) => e.stopPropagation() : undefined}
+      onClick={onOpen}
       style={{
         left: `${anchor.x * 100}%`,
         top: `${anchor.y * 100}%`,
@@ -1146,7 +1316,7 @@ function Marker({ anchor, label, draft = false }: any) {
       }}
     >
       {label}
-    </span>
+    </Tag>
   );
 }
 function Comment({

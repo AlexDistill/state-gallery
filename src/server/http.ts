@@ -658,7 +658,8 @@ export function createServer(o: ServerOptions) {
     const evidenceVersions = j.versions.filter(
       (v: any) =>
         v.id === q.versionId ||
-        q.comments.some((c: any) => c.versionId === v.id),
+        q.comments.some((c: any) => c.versionId === v.id) ||
+        q.pins?.some((p) => p.versionId === v.id),
     );
     res.json({
       ...q,
