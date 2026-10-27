@@ -4,6 +4,26 @@ import { validateRaster, type Raster } from "../shared/raster.js";
 import { ZodError } from "zod";
 import { Store, Fault, digest } from "./domain.js";
 import { defaultMediaDir, getMedia, saveUpload } from "./media.js";
+import {
+  decidePin,
+  latestSeq,
+  listNotes,
+  listShelf,
+  listTurns,
+  pinHistory,
+  type Actor,
+} from "./notes.js";
+import {
+  createGalleryNote,
+  discardNote,
+  isConfidential,
+  link,
+  memberFeed,
+  noteView,
+  push,
+  setConfidential,
+  syncContent,
+} from "./sync.js";
 export interface ServerOptions {
   store: Store;
   secret: string;
@@ -303,7 +323,156 @@ export function createServer(o: ServerOptions) {
   });
   app.get("/api/journeys/:id", (req, res) => {
     access(req);
-    res.json(o.store.get(String(req.params.id)));
+    const id = String(req.params.id);
+    res.json({
+      ...o.store.get(id),
+      latestSeq: latestSeq(o.store, id),
+      confidential: isConfidential(o.store, id),
+    });
+  });
+  // Video notes, pins, turns and shelf for the gallery screens (owner and members).
+  const noteReader = (req: Request) => {
+    const a = access(req);
+    if (a.role !== "owner" && a.role !== "member")
+      throw new Fault(403, "Only the owner or a member can see video notes");
+    return a;
+  };
+  const actorOf = (a: Identity): Actor =>
+    a.role === "member"
+      ? { role: "member", memberId: a.memberId }
+      : { role: "owner" };
+  app.post("/api/journeys/:id/notes", (req, res) => {
+    browserWrite(req);
+    const m = requireMember(o.store, req);
+    res
+      .status(201)
+      .json(createGalleryNote(o.store, m.journey, m.memberId, req.body));
+  });
+  app.get("/api/journeys/:id/notes", (req, res) => {
+    const a = noteReader(req);
+    const id = String(req.params.id);
+    const version = req.query.versionId;
+    res.json({
+      notes: listNotes(o.store, id)
+        .filter((n) => version === undefined || n.versionId === version)
+        .map((n) =>
+          noteView(o.store, n, a.role === "member" ? a.memberId : null),
+        ),
+      latestSeq: latestSeq(o.store, id),
+    });
+  });
+  app.post("/api/journeys/:id/notes/:note/discard", (req, res) => {
+    browserWrite(req);
+    access(req, true);
+    res.json(
+      discardNote(
+        o.store,
+        String(req.params.id),
+        String(req.params.note),
+        mediaDir,
+      ),
+    );
+  });
+  const journeyPin = (req: Request) => {
+    const pin = String(req.params.pin);
+    if (
+      !o.store.db
+        .prepare("SELECT 1 FROM pins WHERE id=? AND journey=?")
+        .get(pin, String(req.params.id))
+    )
+      throw new Fault(404, "Pin not found");
+    return pin;
+  };
+  app.post("/api/journeys/:id/pins/:pin/decisions", (req, res) => {
+    browserWrite(req);
+    const a = noteReader(req);
+    const r = decidePin(
+      o.store,
+      String(req.params.id),
+      String(req.params.pin),
+      req.body,
+      actorOf(a),
+    );
+    if (r.ok) return res.status(201).json({ decision: r.decision });
+    res.status(409).json({
+      error: {
+        code: "decision_conflict",
+        message: r.current
+          ? `${r.current.memberName} already decided this change. Their decision stands; yours is kept in the history.`
+          : "This change was reopened. Refresh and decide again.",
+      },
+      current: r.current,
+    });
+  });
+  app.get("/api/journeys/:id/pins/:pin/history", (req, res) => {
+    noteReader(req);
+    res.json({ decisions: pinHistory(o.store, journeyPin(req)) });
+  });
+  app.get("/api/journeys/:id/turns", (req, res) => {
+    noteReader(req);
+    res.json({ turns: listTurns(o.store, String(req.params.id)) });
+  });
+  app.get("/api/journeys/:id/shelf", (req, res) => {
+    noteReader(req);
+    res.json({ shelf: listShelf(o.store, String(req.params.id)) });
+  });
+  app.post("/api/journeys/:id/link/confidential", (req, res) => {
+    browserWrite(req);
+    access(req, true);
+    if (typeof req.body.confidential !== "boolean")
+      throw new Fault(400, "Confidential must be true or false");
+    res.json(
+      setConfidential(
+        o.store,
+        String(req.params.id),
+        req.body.confidential,
+        "owner",
+      ),
+    );
+  });
+  // Loop sync: a member token sent as a Bearer credential, never a browser session.
+  const loopMember = (req: Request) => {
+    if (!req.headers.authorization?.startsWith("Bearer "))
+      throw new Fault(403, "Sync uses your member token from Loop");
+    return requireMember(o.store, req);
+  };
+  app.post("/api/journeys/:id/link", (req, res) => {
+    const m = loopMember(req);
+    res.json({
+      ...link(o.store, m.journey, m.memberId, req.body),
+      latestSeq: latestSeq(o.store, m.journey),
+    });
+  });
+  app.get("/api/journeys/:id/sync/feed", (req, res) => {
+    const m = loopMember(req);
+    const after = Number(req.query.after ?? 0);
+    if (!Number.isSafeInteger(after) || after < 0)
+      throw new Fault(400, "after must be a feed seq (0 or more)");
+    o.store.markLinkedLoop(m.memberId);
+    res.json(memberFeed(o.store, m.journey, m.memberId, after));
+  });
+  app.get("/api/journeys/:id/sync/content", (req, res) => {
+    const m = loopMember(req);
+    const list = (k: string) => {
+      const v = req.query[k];
+      const ids = typeof v === "string" && v ? v.split(",") : [];
+      if (ids.length > 500)
+        throw new Fault(400, `Ask for at most 500 ${k} at once`);
+      return ids;
+    };
+    res.json(
+      syncContent(o.store, m.journey, m.memberId, {
+        notes: list("notes"),
+        turns: list("turns"),
+        shelf: list("shelf"),
+        versions: list("versions"),
+        requests: list("requests"),
+      }),
+    );
+  });
+  app.post("/api/journeys/:id/sync/push", (req, res) => {
+    const m = loopMember(req);
+    res.json(push(o.store, m.journey, m.memberId, req.body, mediaDir));
   });
   app.get("/api/journeys/:id/assets/:asset", (req, res) => {
     access(req);

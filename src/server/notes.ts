@@ -30,6 +30,7 @@ export type DecisionResult =
 export const NOTES_SCHEMA = `
 CREATE TABLE IF NOT EXISTS video_notes(id TEXT PRIMARY KEY,journey TEXT NOT NULL,version_id TEXT NOT NULL,step_id TEXT NOT NULL,recorder_id TEXT,recorder_name TEXT NOT NULL,media_id TEXT,medium TEXT NOT NULL,status TEXT NOT NULL,transcript TEXT,summary TEXT,content_version INTEGER NOT NULL,created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS video_notes_journey ON video_notes(journey);
+CREATE UNIQUE INDEX IF NOT EXISTS video_notes_media ON video_notes(media_id) WHERE media_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS pins(id TEXT PRIMARY KEY,note_id TEXT NOT NULL REFERENCES video_notes(id) ON DELETE CASCADE,journey TEXT NOT NULL,anchor TEXT NOT NULL,at_ms INTEGER NOT NULL,request_id TEXT);
 CREATE INDEX IF NOT EXISTS pins_note ON pins(note_id);
 CREATE INDEX IF NOT EXISTS pins_journey ON pins(journey);
@@ -250,6 +251,12 @@ export function createNote(
     const me = who(store, journey, actor);
     const step = stepOf(store.get(journey), input.versionId, input.stepId);
     for (const p of input.pins) checkAnchor(p.anchor, step);
+    if (
+      db(store)
+        .prepare("SELECT 1 FROM video_notes WHERE media_id=?")
+        .get(input.mediaId)
+    )
+      throw new Fault(409, "This recording already belongs to another note");
     const id = randomUUID();
     db(store)
       .prepare(

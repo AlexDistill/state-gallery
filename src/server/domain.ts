@@ -159,7 +159,9 @@ export class Store {
           );
         if (
           Object.keys(m.responses).some(
-            (k) => !q.comments.some((c) => c.id === k),
+            (k) =>
+              !q.comments.some((c) => c.id === k) &&
+              !q.pins?.some((p) => p.pinId === k),
           )
         )
           throw new Fault(400, "Response references feedback outside request");
