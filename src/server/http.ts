@@ -3,12 +3,15 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { validateRaster, type Raster } from "../shared/raster.js";
 import { ZodError } from "zod";
 import { Store, Fault, digest } from "./domain.js";
+import { defaultMediaDir, getMedia, saveUpload } from "./media.js";
 export interface ServerOptions {
   store: Store;
   secret: string;
   origin: string;
   publicDir?: string;
   hosted?: boolean;
+  /** Where uploaded recordings live; defaults to `media/` beside the database. */
+  mediaDir?: string;
 }
 export type MemberIdentity = {
   role: "member";
@@ -91,9 +94,59 @@ export function createServer(o: ServerOptions) {
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
       "Content-Security-Policy":
-        "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'",
+        "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'",
     });
     next();
+  });
+  const mediaDir = o.mediaDir ?? defaultMediaDir(o.store);
+  // Raw media routes come before the JSON parser so the body streams to disk.
+  app.put("/api/journeys/:id/media", async (req, res) => {
+    if (
+      !req.headers.authorization?.startsWith("Bearer ") &&
+      req.headers.origin !== o.origin
+    )
+      throw new Fault(403, "Write origin is not allowed");
+    const m = requireMember(o.store, req);
+    try {
+      const { media, existing } = await saveUpload(o.store, mediaDir, {
+        journey: m.journey,
+        uploader: m.memberId,
+        contentType: req.headers["content-type"],
+        contentLength: req.headers["content-length"],
+        body: req,
+      });
+      res.status(existing ? 200 : 201).json({
+        id: media.id,
+        mime: media.mime,
+        size: media.size,
+        sha256: media.sha256,
+      });
+    } catch (e) {
+      // The rest of a refused body is not read; close rather than drain it.
+      if (!req.complete) res.set("Connection", "close");
+      throw e;
+    }
+  });
+  app.get("/api/journeys/:id/media/:media", (req, res, next) => {
+    const a = authenticate(o.store, req);
+    if (a.role !== "owner" && a.journey !== String(req.params.id))
+      throw new Fault(403, "This link belongs to another journey");
+    const m = getMedia(o.store, String(req.params.media));
+    if (!m || m.journey !== String(req.params.id))
+      throw new Fault(404, "Media not found");
+    if (
+      m.restrictedTo &&
+      !(a.role === "member" && a.memberId === m.restrictedTo)
+    )
+      throw new Fault(
+        403,
+        "This recording is waiting for its recorder to process it",
+      );
+    res.type(m.mime);
+    res.sendFile(m.path, { root: mediaDir, cacheControl: false }, (e) => {
+      if (e && !res.headersSent)
+        next((e as any).status === 404 ? new Fault(404, "Media not found") : e);
+    });
   });
   app.use(express.json({ limit: "40mb" }));
   app.use((req, res, next) => {
