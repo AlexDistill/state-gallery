@@ -80,3 +80,54 @@ export const manifestSchema = z
   });
 export type Manifest = z.infer<typeof manifestSchema>;
 export type Anchor = z.infer<typeof anchorSchema>;
+const id = z.string().regex(/^[\w.:-]{1,200}$/);
+const atMs = z.number().int().min(0).max(86_400_000);
+export const pinInputSchema = z.object({ id, anchor: anchorSchema, atMs });
+export const noteInputSchema = z
+  .object({
+    versionId: z.string().min(1).max(200),
+    stepId: z.string().min(1).max(100),
+    mediaId: z.string().min(1).max(200),
+    medium: z.enum(["audio", "video"]),
+    pins: z.array(pinInputSchema).max(500),
+  })
+  .refine(
+    (n) => new Set(n.pins.map((p) => p.id)).size === n.pins.length,
+    "Duplicate pin IDs",
+  );
+export const processingSchema = z.object({
+  transcript: z.string().max(500_000),
+  summary: z.string().max(20_000),
+  proposals: z
+    .array(
+      z.object({
+        pinId: id,
+        quote: z.string().max(4000),
+        proposal: text,
+        anchor: anchorSchema.optional(),
+        atMs: atMs.optional(),
+      }),
+    )
+    .max(500),
+});
+export const decisionInputSchema = z.object({
+  expected: z.string().max(200).nullable(),
+  status: z.enum(["approved", "changed", "dropped"]),
+  text: z.string().max(4000).optional(),
+});
+const titled = z.object({ title: text, ref: z.string().max(500).optional() });
+export const turnInputSchema = z.object({
+  loopTurnId: id,
+  parentIds: z.array(id).max(50),
+  inputs: z.array(titled).max(500),
+  outputs: z
+    .array(titled.extend({ kind: z.enum(["image", "other"]) }))
+    .max(500),
+  reactionNoteIds: z.array(z.string().max(200)).max(500),
+  versionId: z.string().max(200).nullable(),
+  notAVersionReason: z.string().trim().min(1).max(4000).nullable(),
+});
+export const shelfInputSchema = z.object({
+  itemId: id,
+  reason: z.string().max(4000),
+});

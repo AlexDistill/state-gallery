@@ -8,6 +8,7 @@ import type {
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID, createHash, randomBytes } from "node:crypto";
 import { anchorSchema, manifestSchema } from "../shared/schema.js";
+import { NOTES_SCHEMA, appendFeed, consumeDecidedPins } from "./notes.js";
 export class Fault extends Error {
   constructor(
     public status: number,
@@ -36,20 +37,29 @@ export class Store {
   constructor(path: string) {
     this.db = new DatabaseSync(path);
     this.db.exec(
-      `PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; CREATE TABLE IF NOT EXISTS journeys(id TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY,journey TEXT NOT NULL,mime TEXT NOT NULL,bytes BLOB NOT NULL,width INTEGER,height INTEGER); CREATE TABLE IF NOT EXISTS auth(id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS member_grants(id TEXT PRIMARY KEY,journey TEXT NOT NULL,name TEXT NOT NULL,invite_hash TEXT UNIQUE,token_hash TEXT UNIQUE,created_at INTEGER NOT NULL,invite_expires_at INTEGER NOT NULL,redeemed_at INTEGER,revoked_at INTEGER,linked_loop_at INTEGER);`,
+      `PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; CREATE TABLE IF NOT EXISTS journeys(id TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY,journey TEXT NOT NULL,mime TEXT NOT NULL,bytes BLOB NOT NULL,width INTEGER,height INTEGER); CREATE TABLE IF NOT EXISTS auth(id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS member_grants(id TEXT PRIMARY KEY,journey TEXT NOT NULL,name TEXT NOT NULL,invite_hash TEXT UNIQUE,token_hash TEXT UNIQUE,created_at INTEGER NOT NULL,invite_expires_at INTEGER NOT NULL,redeemed_at INTEGER,revoked_at INTEGER,linked_loop_at INTEGER);` +
+        NOTES_SCHEMA,
     );
   }
   close() {
     this.db.close();
   }
+  private depth = 0;
+  /** Nested calls run as savepoints, so a whole push can be one transaction. */
   transaction<T>(fn: () => T): T {
-    this.db.exec("BEGIN IMMEDIATE");
+    const sp = `sp${this.depth}`;
+    this.db.exec(this.depth ? `SAVEPOINT ${sp}` : "BEGIN IMMEDIATE");
+    this.depth++;
     try {
       const v = fn();
-      this.db.exec("COMMIT");
+      this.depth--;
+      this.db.exec(this.depth ? `RELEASE ${sp}` : "COMMIT");
       return v;
     } catch (e) {
-      this.db.exec("ROLLBACK");
+      this.depth--;
+      this.db.exec(
+        this.depth ? `ROLLBACK TO ${sp}; RELEASE ${sp}` : "ROLLBACK",
+      );
       throw e;
     }
   }
@@ -181,6 +191,7 @@ export class Store {
       if (m.requestId)
         j.requests.find((q) => q.id === m.requestId)!.successorId = v.id;
       this.changed(j);
+      appendFeed(this, id, "version", { versionId: v.id });
       return v;
     });
   }
@@ -272,8 +283,10 @@ export class Store {
         createdAt: new Date().toISOString(),
         successorId: null,
       };
+      q.pins = consumeDecidedPins(this, id, q.id);
       j.requests.push(q);
       this.changed(j);
+      appendFeed(this, id, "request", { requestId: q.id });
       return q;
     });
   }
