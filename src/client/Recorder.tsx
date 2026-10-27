@@ -376,7 +376,9 @@ export function RecorderPanel({
         </>
       ) : rec.preview ? (
         <>
-          <h3>Watch it back</h3>
+          <h3>
+            {rec.preview.medium === "video" ? "Watch it back" : "Listen back"}
+          </h3>
           {rec.preview.medium === "video" ? (
             <video
               ref={(el) => {

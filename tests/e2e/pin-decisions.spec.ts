@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { randomBytes } from "node:crypto";
+import sharp from "sharp";
 import {
   BASE,
   asMember,
@@ -55,15 +56,27 @@ async function processedNote(title: string) {
     ],
   });
   expect(pushed.status).toBe(200);
-  return { owner, journey, alex, pins };
+  return { owner, journey, versionId, alex, pins, mediaId };
 }
 
 test("approving, editing and dropping three pins shows three decisions with the member's name", async ({
   page,
 }) => {
-  const { owner, journey, pins } = await processedNote("Three decisions");
+  const { owner, journey, pins, mediaId } =
+    await processedNote("Three decisions");
   const amadeo = await joinAndOpenStep(page, owner, journey, "Amadeo", false);
   await expect(page.getByText("Three points on the home screen")).toBeVisible();
+
+  // Another member can play the processed note back.
+  const player = page.getByLabel("Play Alex's voice note");
+  await expect(player).toBeVisible();
+  const src = await player.getAttribute("src");
+  expect(src).toBe(`/api/journeys/${journey}/media/${mediaId}`);
+  expect((await page.request.get(src!)).status()).toBe(200);
+  // Nothing decided yet, so there is nothing to request.
+  await expect(
+    page.getByRole("button", { name: "Request revision" }),
+  ).toBeDisabled();
 
   await page.getByRole("button", { name: /Enlarge the title/ }).click();
   await expect(page.getByText("“about enlarge the title”")).toBeVisible();
@@ -78,6 +91,10 @@ test("approving, editing and dropping three pins shows three decisions with the 
   await expect(
     page.locator(".decision").getByText("Make the button teal"),
   ).toBeVisible();
+  // The row shows the changed text, not the proposal.
+  await expect(page.locator(".pin-title").nth(1)).toHaveText(
+    "Make the button teal",
+  );
 
   await page.getByRole("button", { name: /Remove the border/ }).click();
   await page.getByRole("button", { name: "Drop" }).click();
@@ -91,6 +108,7 @@ test("approving, editing and dropping three pins shows three decisions with the 
     "Changed",
     "Dropped",
   ]);
+  await expect(page.getByText("In revision request")).toHaveCount(0);
   const { body } = await asMember(amadeo.token, `/journeys/${journey}/notes`);
   expect(
     body.notes[0].pins.map((p: any) => [
@@ -110,6 +128,15 @@ test("approving, editing and dropping three pins shows three decisions with the 
   await expect(
     page.getByText(/Latest request: 2 decided comments/),
   ).toBeVisible();
+  // Every row is now in the request, and there is nothing new to send.
+  await expect(page.locator(".pin-request")).toHaveText([
+    "In revision request",
+    "In revision request",
+    "In revision request",
+  ]);
+  await expect(
+    page.getByRole("button", { name: "Request revision" }),
+  ).toBeDisabled();
   await page.getByRole("button", { name: /Enlarge the title/ }).click();
   await expect(
     page.getByText(
@@ -145,10 +172,16 @@ test("a stale decision shows the existing one and changes nothing", async ({
   expect(first.status).toBe(201);
 
   await page.getByRole("button", { name: "Drop" }).click();
-  await expect(page.getByRole("alert")).toContainText(
-    /Alex already approved this at \d/,
+  await expect(page.getByRole("alert")).toHaveText(
+    "Alex already decided this change. Their decision stands; yours is kept in the history.",
   );
   await expect(page.getByText("Approved by Alex")).toBeVisible();
+  await expect(page.locator(".decision .nowrap")).toHaveText(/^\d{1,2}:\d{2}/);
+  // The comment is decided: no more Approve / Change / Drop here.
+  for (const name of ["Approve", "Change", "Drop"])
+    await expect(page.getByRole("button", { name, exact: true })).toHaveCount(
+      0,
+    );
   await expect(
     page.getByRole("list", { name: "Decision history" }),
   ).toContainText("Dropped · Amadeo");
@@ -168,4 +201,72 @@ test("a stale decision shows the existing one and changes nothing", async ({
     id: first.body.decision.id,
     status: "approved",
   });
+});
+
+test("a round that became a version lists what came out, and Later shows readable titles", async ({
+  page,
+}) => {
+  const { owner, journey, versionId, alex } =
+    await processedNote("Rounds and later");
+  const png = await sharp({
+    create: { width: 600, height: 400, channels: 3, background: "#c9b79c" },
+  })
+    .png()
+    .toBuffer();
+  const up = await fetch(`${BASE}/api/journeys/${journey}/media`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${alex.token}`,
+      "Content-Type": "image/png",
+    },
+    body: new Uint8Array(png),
+  });
+  const { id: image } = (await up.json()) as { id: string };
+  const pushed = await asMember(alex.token, `/journeys/${journey}/sync/push`, {
+    link: { seedId: "seed-Alex", bed: "shared:team", confidential: false },
+    turns: [
+      {
+        eventId: "rounds-turn-1",
+        loopTurnId: "rounds-turn-1",
+        parentIds: [],
+        inputs: [{ title: "The brief" }],
+        outputs: [{ title: "Home, revised", kind: "image" }],
+        reactionNoteIds: [],
+        parentVersionId: versionId,
+        version: {
+          steps: [
+            {
+              id: "home",
+              title: "Home",
+              kind: "mockup",
+              viewport: { width: 600, height: 400 },
+              image,
+            },
+          ],
+        },
+      },
+    ],
+    shelf: [
+      {
+        eventId: "rounds-shelf-1",
+        itemId: "testimonials-strip",
+        reason: "Wait for real quotes",
+      },
+      { eventId: "rounds-shelf-2", itemId: "home", reason: "Maybe later" },
+    ],
+  });
+  expect(pushed.status).toBe(200);
+  await joinAndOpenStep(page, owner, journey, "Amadeo", false);
+  await page.getByRole("button", { name: "Rounds", exact: true }).click();
+  const round = page.locator(".turn").first();
+  await expect(round).toContainText("Became version 2 · 1 image as steps");
+  await expect(round.locator(".turn-output")).toHaveText(["Home, revised"]);
+  const later = page.locator(".shelf-item strong");
+  // Both arrive in one push with the same time, so their order is not asserted.
+  await expect(later).toHaveCount(2);
+  expect((await later.allTextContents()).sort()).toEqual([
+    "Home",
+    "Testimonials strip",
+  ]);
+  await expect(page.getByText("Wait for real quotes")).toBeVisible();
 });

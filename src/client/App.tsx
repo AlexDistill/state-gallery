@@ -3,8 +3,16 @@ import { api } from "./api.js";
 import type { Anchor } from "../shared/schema.js";
 import type { VideoNote } from "../shared/model.js";
 import { RecorderPanel, useRecorder } from "./Recorder.js";
-import { NotesPanel, stepPins } from "./PinDecisions.js";
+import { NotesPanel, hasUnsentDecisions, stepPins } from "./PinDecisions.js";
 import { Turns } from "./Turns.js";
+/** "2 steps", plus how complete the capture is when that is known. */
+export const stepsLine = (steps: number, coverage: string) =>
+  `${steps} ${steps === 1 ? "step" : "steps"}` +
+  (coverage === "complete"
+    ? " · every screen captured"
+    : coverage === "partial"
+      ? " · some screens not captured yet"
+      : "");
 const asset = (j: string, s: any) => `/api/journeys/${j}/assets/${s.assetId}`;
 function Input({ label, ...props }: any) {
   return (
@@ -319,7 +327,7 @@ export function App() {
                 <h1>{journey.title}</h1>
                 <p>
                   {v
-                    ? `${v.steps.length} steps · ${v.coverage} capture coverage`
+                    ? stepsLine(v.steps.length, v.coverage)
                     : "Add your first screens to start a review."}
                 </p>
               </div>
@@ -523,7 +531,9 @@ export function App() {
                   round. Dropped comments resolve; undecided ones stay open.
                 </p>
                 <button
-                  disabled={v.id !== journey.currentId}
+                  disabled={
+                    v.id !== journey.currentId || !hasUnsentDecisions(notes)
+                  }
                   onClick={() =>
                     action(async () => {
                       await api(`/journeys/${journey.id}/requests`, {
@@ -1135,7 +1145,8 @@ function ScreenReview({
               !session.linkedLoopAt &&
               !journey.confidential && (
                 <p className="small recorder-hint">
-                  Link Loop to record notes here
+                  To record notes here, link your Loop: run{" "}
+                  <code>loop link</code> with your member token.
                 </p>
               )
             ))}
