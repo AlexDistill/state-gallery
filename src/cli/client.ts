@@ -15,6 +15,7 @@ import type {
   Version,
   Approval,
   RevisionRequest,
+  MemberGrant,
 } from "../shared/model.js";
 export type { Manifest, Journey, Version };
 export interface BuildBrief {
@@ -108,6 +109,17 @@ export class Client {
   }
   getJourney(journey: string): Promise<Journey> {
     return this.request(`/journeys/${encodeURIComponent(journey)}`);
+  }
+  /** Owner only. The invite is a secret: send its link privately; it expires in 7 days unless redeemed. */
+  async inviteMember(
+    journey: string,
+    name: string,
+  ): Promise<MemberGrant & { invite: string; link: string }> {
+    const g = await this.request<MemberGrant & { invite: string }>(
+      `/journeys/${encodeURIComponent(journey)}/members`,
+      { name },
+    );
+    return { ...g, link: `${this.base}/#invite=${g.invite}` };
   }
   getBuildBrief(journey: string): Promise<BuildBrief> {
     return this.request(`/journeys/${encodeURIComponent(journey)}/build-brief`);

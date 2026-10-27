@@ -52,3 +52,13 @@ export interface Journey {
   authorization: Approval | null;
   submissions: Record<string, { hash: string; id: string }>;
 }
+export interface MemberGrant {
+  id: string;
+  journey: string;
+  name: string;
+  createdAt: number;
+  inviteExpiresAt: number;
+  redeemedAt: number | null;
+  revokedAt: number | null;
+  linkedLoopAt: number | null;
+}

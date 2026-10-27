@@ -25,8 +25,13 @@ export function App() {
   const [token] = useState(
     () => new URLSearchParams(location.hash.slice(1)).get("review") ?? "",
   );
+  const [invite, setInvite] = useState(
+    () => new URLSearchParams(location.hash.slice(1)).get("invite") ?? "",
+  );
   const [secret, setSecret] = useState(""),
-    [name, setName] = useState("");
+    [name, setName] = useState(""),
+    [memberToken, setMemberToken] = useState(""),
+    [newMemberToken, setNewMemberToken] = useState("");
   const owner = session?.role === "owner";
   const v =
     journey?.versions.find((v: any) => v.id === versionId) ??
@@ -61,7 +66,7 @@ export function App() {
     }
   };
   useEffect(() => {
-    if (token) {
+    if (token || invite) {
       history.replaceState(null, "", location.pathname);
       setLoaded(true);
       return;
@@ -88,12 +93,19 @@ export function App() {
   const login = async (e: FormEvent) => {
     e.preventDefault();
     await action(async () => {
-      const s = await api(
-        token ? "/join" : "/login",
-        token ? { token, name } : { secret },
-      );
+      const s = invite
+        ? await api("/members/redeem", { invite })
+        : memberToken
+          ? await api("/members/sign-in", { token: memberToken })
+          : await api(
+              token ? "/join" : "/login",
+              token ? { token, name } : { secret },
+            );
+      if (s.memberToken) setNewMemberToken(s.memberToken);
+      setInvite("");
       setSession(s);
       setSecret("");
+      setMemberToken("");
       const list = await api("/journeys");
       setJourneys(list);
       if (s.journey) setJourney(await api(`/journeys/${s.journey}`));
@@ -111,16 +123,24 @@ export function App() {
         <div className="wordmark">◫ State Gallery</div>
         <div className="access-card">
           <span className="eyebrow">
-            {token ? "Shared review" : "Your studio"}
+            {invite ? "Member invite" : token ? "Shared review" : "Your studio"}
           </span>
-          <h1>{token ? "A fresh pair of eyes." : "See the whole journey."}</h1>
+          <h1>
+            {invite
+              ? "Join the project."
+              : token
+                ? "A fresh pair of eyes."
+                : "See the whole journey."}
+          </h1>
           <p>
-            {token
-              ? "Join with a display name to leave feedback. Shared links identify a guest, not a verified account."
-              : "Review the screens, discuss the details, and decide what to build."}
+            {invite
+              ? "Accept to join as the member the owner named. This invite works once."
+              : token
+                ? "Join with a display name to leave feedback. Shared links identify a guest, not a verified account."
+                : "Review the screens, discuss the details, and decide what to build."}
           </p>
           <form onSubmit={login}>
-            {token ? (
+            {invite ? null : token ? (
               <Input
                 label="Your display name"
                 value={name}
@@ -137,8 +157,25 @@ export function App() {
                 required
               />
             )}
-            <button>{token ? "Join review" : "Open studio"}</button>
+            <button>
+              {invite ? "Accept invite" : token ? "Join review" : "Open studio"}
+            </button>
           </form>
+          {!invite && !token && (
+            <details>
+              <summary>Sign in with a member token</summary>
+              <form onSubmit={login}>
+                <Input
+                  label="Member token"
+                  type="password"
+                  value={memberToken}
+                  onChange={(e: any) => setMemberToken(e.target.value)}
+                  required
+                />
+                <button>Sign in as member</button>
+              </form>
+            </details>
+          )}
           {error && (
             <p className="error" role="alert">
               {error}
@@ -155,7 +192,11 @@ export function App() {
           ◫ State Gallery
         </a>
         <span className="small">
-          {owner ? "Owner studio" : `Reviewing as ${session.name}`}
+          {owner
+            ? "Owner studio"
+            : session.role === "member"
+              ? `Member · ${session.name}`
+              : `Reviewing as ${session.name}`}
         </span>
         <button
           className="ghost"
@@ -176,6 +217,19 @@ export function App() {
             {error}
             <button className="ghost" onClick={() => setError("")}>
               Dismiss
+            </button>
+          </div>
+        )}
+        {newMemberToken && (
+          <div className="panel" role="status">
+            <h2>Your member token</h2>
+            <p>
+              Shown once. Use it for <code>loop link</code> and to sign in on
+              another browser. Keep it private.
+            </p>
+            <Input label="Member token" readOnly value={newMemberToken} />
+            <button className="ghost" onClick={() => setNewMemberToken("")}>
+              I have saved it
             </button>
           </div>
         )}

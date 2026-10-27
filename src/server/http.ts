@@ -10,13 +10,78 @@ export interface ServerOptions {
   publicDir?: string;
   hosted?: boolean;
 }
-type Identity = {
-  role: "owner" | "reviewer" | "agent";
-  journey?: string;
-  name?: string;
-  grantId?: string;
+export type MemberIdentity = {
+  role: "member";
+  journey: string;
+  memberId: string;
+  name: string;
+  linkedLoopAt: number | null;
   expiresAt: number;
 };
+export type Identity =
+  | {
+      role: "owner" | "reviewer" | "agent";
+      journey?: string;
+      name?: string;
+      grantId?: string;
+      memberId?: undefined;
+      expiresAt: number;
+    }
+  | MemberIdentity;
+export const MEMBER_SESSION_LIFETIME = 30 * 86400000;
+const revoked = () =>
+  new Fault(
+    401,
+    "Access expired or revoked. Ask the owner for a new review link.",
+  );
+const member = (
+  g: ReturnType<Store["memberGrant"]>,
+  expiresAt: number,
+): MemberIdentity => {
+  if (!g || g.revokedAt || !g.redeemedAt) throw revoked();
+  return {
+    role: "member",
+    journey: g.journey,
+    memberId: g.id,
+    name: g.name,
+    linkedLoopAt: g.linkedLoopAt,
+    expiresAt,
+  };
+};
+/** Resolves the caller from a Bearer token or the sg_session cookie. Member names always come from the grant. */
+export function authenticate(store: Store, req: Request): Identity {
+  const bearer = req.headers.authorization?.startsWith("Bearer ")
+    ? req.headers.authorization.slice(7)
+    : null;
+  if (bearer) {
+    const g = store.memberGrantByToken(bearer);
+    if (g) return member(g, Number.MAX_SAFE_INTEGER);
+  }
+  const cookie = req.headers.cookie
+    ?.split(";")
+    .map((s) => s.trim())
+    .find((s) => s.startsWith("sg_session="))
+    ?.slice(11);
+  const a = store.authGet(digest(bearer ?? cookie ?? ""));
+  if (!a || a.expiresAt < Date.now()) throw revoked();
+  if (bearer && a.role !== "agent")
+    throw new Fault(401, "Use a journey agent credential");
+  if (a.memberId) return member(store.memberGrant(a.memberId), a.expiresAt);
+  if (a.grantId) {
+    const g = store.authGet(a.grantId);
+    if (!g || g.revoked || g.expiresAt < Date.now()) throw revoked();
+  }
+  return a;
+}
+/** Guard for member-only actions on the journey named by `req.params.id`. */
+export function requireMember(store: Store, req: Request): MemberIdentity {
+  const a = authenticate(store, req);
+  if (a.role !== "member")
+    throw new Fault(403, "Only a journey member can do this");
+  if (a.journey !== String(req.params.id))
+    throw new Fault(403, "This link belongs to another journey");
+  return a;
+}
 export function createServer(o: ServerOptions) {
   const app = express();
   app.disable("x-powered-by");
@@ -41,33 +106,7 @@ export function createServer(o: ServerOptions) {
   });
   const failures = new Map<string, { count: number; start: number }>();
   const token = () => randomBytes(32).toString("base64url");
-  const identity = (req: Request): Identity => {
-    const bearer = req.headers.authorization?.startsWith("Bearer ")
-      ? req.headers.authorization.slice(7)
-      : null;
-    const cookie = req.headers.cookie
-      ?.split(";")
-      .map((s) => s.trim())
-      .find((s) => s.startsWith("sg_session="))
-      ?.slice(11);
-    const a = o.store.authGet(digest(bearer ?? cookie ?? ""));
-    if (!a || a.expiresAt < Date.now())
-      throw new Fault(
-        401,
-        "Access expired or revoked. Ask the owner for a new review link.",
-      );
-    if (bearer && a.role !== "agent")
-      throw new Fault(401, "Use a journey agent credential");
-    if (a.grantId) {
-      const g = o.store.authGet(a.grantId);
-      if (!g || g.revoked || g.expiresAt < Date.now())
-        throw new Fault(
-          401,
-          "Access expired or revoked. Ask the owner for a new review link.",
-        );
-    }
-    return a;
-  };
+  const identity = (req: Request) => authenticate(o.store, req);
   const access = (req: Request, owner = false) => {
     const a = identity(req);
     if (owner && a.role !== "owner")
@@ -81,7 +120,17 @@ export function createServer(o: ServerOptions) {
     if (req.headers.origin !== o.origin)
       throw new Fault(403, "Write origin is not allowed");
   };
-  const issueSession = (res: express.Response, a: Identity) => {
+  const issueSession = (
+    res: express.Response,
+    a:
+      | Identity
+      | {
+          role: "member";
+          journey: string;
+          memberId: string;
+          expiresAt: number;
+        },
+  ) => {
     const s = token();
     o.store.authSave(digest(s), a);
     res.cookie("sg_session", s, {
@@ -157,6 +206,37 @@ export function createServer(o: ServerOptions) {
     res.clearCookie("sg_session", { path: "/" });
     res.json({ ok: true });
   });
+  const memberSession = (res: express.Response, g: MemberIdentity) => {
+    issueSession(res, {
+      role: "member",
+      journey: g.journey,
+      memberId: g.memberId,
+      expiresAt: Date.now() + MEMBER_SESSION_LIFETIME,
+    });
+  };
+  app.post("/api/members/redeem", (req, res) => {
+    browserWrite(req);
+    limit(req);
+    const { grant, token } = o.store.redeemInvite(
+      String(req.body.invite ?? ""),
+    );
+    const m = member(grant, 0);
+    memberSession(res, m);
+    res.json({ ...m, expiresAt: undefined, memberToken: token });
+  });
+  app.post("/api/members/sign-in", (req, res) => {
+    browserWrite(req);
+    limit(req);
+    const g = o.store.memberGrantByToken(String(req.body.token ?? ""));
+    if (!g || g.revokedAt)
+      throw new Fault(
+        401,
+        "This member token was revoked or is not recognised. Ask the owner for a new invite.",
+      );
+    const m = member(g, 0);
+    memberSession(res, m);
+    res.json({ ...m, expiresAt: undefined });
+  });
   app.get("/api/session", (req, res) => res.json(identity(req)));
   app.get("/api/journeys", (req, res) => {
     const a = identity(req);
@@ -224,10 +304,29 @@ export function createServer(o: ServerOptions) {
     o.store.authSave(String(req.params.grant), g);
     res.json({ ok: true });
   });
+  app.post("/api/journeys/:id/members", (req, res) => {
+    browserWrite(req);
+    access(req, true);
+    res
+      .status(201)
+      .json(
+        o.store.inviteMember(
+          String(req.params.id),
+          String(req.body.name ?? ""),
+        ),
+      );
+  });
+  app.post("/api/journeys/:id/members/:member/revoke", (req, res) => {
+    browserWrite(req);
+    access(req, true);
+    res.json(
+      o.store.revokeMember(String(req.params.id), String(req.params.member)),
+    );
+  });
   app.post("/api/journeys/:id/versions", async (req, res) => {
     browserWrite(req);
     const a = access(req);
-    if (a.role === "reviewer")
+    if (a.role === "reviewer" || a.role === "member")
       throw new Fault(403, "Only the owner or agent can submit versions");
     if (a.role === "agent" && !req.body.manifest?.requestId)
       throw new Fault(
@@ -313,7 +412,9 @@ export function createServer(o: ServerOptions) {
   });
   app.post("/api/journeys/:id/requests", (req, res) => {
     browserWrite(req);
-    access(req, true);
+    const a = access(req);
+    if (a.role !== "owner" && a.role !== "member")
+      throw new Fault(403, "Only the owner or a member can request a revision");
     res
       .status(201)
       .json(

@@ -3,9 +3,10 @@ import type {
   Version,
   Comment,
   RevisionRequest,
+  MemberGrant,
 } from "../shared/model.js";
 import { DatabaseSync } from "node:sqlite";
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID, createHash, randomBytes } from "node:crypto";
 import { anchorSchema, manifestSchema } from "../shared/schema.js";
 export class Fault extends Error {
   constructor(
@@ -15,6 +16,17 @@ export class Fault extends Error {
     super(message);
   }
 }
+export const INVITE_LIFETIME = 7 * 86400000;
+const grantRow = (r: Record<string, unknown>): MemberGrant => ({
+  id: String(r.id),
+  journey: String(r.journey),
+  name: String(r.name),
+  createdAt: Number(r.created_at),
+  inviteExpiresAt: Number(r.invite_expires_at),
+  redeemedAt: r.redeemed_at == null ? null : Number(r.redeemed_at),
+  revokedAt: r.revoked_at == null ? null : Number(r.revoked_at),
+  linkedLoopAt: r.linked_loop_at == null ? null : Number(r.linked_loop_at),
+});
 export const digest = (v: unknown) =>
   createHash("sha256")
     .update(typeof v === "string" || Buffer.isBuffer(v) ? v : JSON.stringify(v))
@@ -24,7 +36,7 @@ export class Store {
   constructor(path: string) {
     this.db = new DatabaseSync(path);
     this.db.exec(
-      `PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; CREATE TABLE IF NOT EXISTS journeys(id TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY,journey TEXT NOT NULL,mime TEXT NOT NULL,bytes BLOB NOT NULL,width INTEGER,height INTEGER); CREATE TABLE IF NOT EXISTS auth(id TEXT PRIMARY KEY,body TEXT NOT NULL);`,
+      `PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; CREATE TABLE IF NOT EXISTS journeys(id TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY,journey TEXT NOT NULL,mime TEXT NOT NULL,bytes BLOB NOT NULL,width INTEGER,height INTEGER); CREATE TABLE IF NOT EXISTS auth(id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS member_grants(id TEXT PRIMARY KEY,journey TEXT NOT NULL,name TEXT NOT NULL,invite_hash TEXT UNIQUE,token_hash TEXT UNIQUE,created_at INTEGER NOT NULL,invite_expires_at INTEGER NOT NULL,redeemed_at INTEGER,revoked_at INTEGER,linked_loop_at INTEGER);`,
     );
   }
   close() {
@@ -299,5 +311,69 @@ export class Store {
   authGet(id: string): any {
     const r = this.db.prepare("SELECT body FROM auth WHERE id=?").get(id);
     return r ? JSON.parse(String(r.body)) : null;
+  }
+  inviteMember(journey: string, rawName: string, now = Date.now()) {
+    this.get(journey);
+    const name = rawName.trim();
+    if (!name || name.length > 100)
+      throw new Fault(400, "Enter a display name (up to 100 characters)");
+    const invite = randomBytes(32).toString("base64url");
+    const id = randomUUID();
+    this.db
+      .prepare(
+        "INSERT INTO member_grants(id,journey,name,invite_hash,created_at,invite_expires_at) VALUES(?,?,?,?,?,?)",
+      )
+      .run(id, journey, name, digest(invite), now, now + INVITE_LIFETIME);
+    return { ...this.memberGrant(id)!, invite };
+  }
+  redeemInvite(invite: string, now = Date.now()) {
+    const token = randomBytes(32).toString("base64url");
+    return this.transaction(() => {
+      const r = this.db
+        .prepare(
+          "SELECT id FROM member_grants WHERE invite_hash=? AND redeemed_at IS NULL AND revoked_at IS NULL AND invite_expires_at>?",
+        )
+        .get(digest(invite), now);
+      if (!invite || !r)
+        throw new Fault(
+          401,
+          "This invite expired, was revoked or was already used. Ask the owner for a new invite.",
+        );
+      this.db
+        .prepare(
+          "UPDATE member_grants SET invite_hash=NULL, token_hash=?, redeemed_at=? WHERE id=?",
+        )
+        .run(digest(token), now, String(r.id));
+      return { grant: this.memberGrant(String(r.id))!, token };
+    });
+  }
+  memberGrant(id: string): MemberGrant | null {
+    const r = this.db.prepare("SELECT * FROM member_grants WHERE id=?").get(id);
+    return r ? grantRow(r) : null;
+  }
+  memberGrantByToken(token: string): MemberGrant | null {
+    if (!token) return null;
+    const r = this.db
+      .prepare("SELECT * FROM member_grants WHERE token_hash=?")
+      .get(digest(token));
+    return r ? grantRow(r) : null;
+  }
+  revokeMember(journey: string, id: string, now = Date.now()) {
+    const g = this.memberGrant(id);
+    if (!g || g.journey !== journey) throw new Fault(404, "Member not found");
+    this.db
+      .prepare(
+        "UPDATE member_grants SET revoked_at=COALESCE(revoked_at,?) WHERE id=?",
+      )
+      .run(now, id);
+    return this.memberGrant(id)!;
+  }
+  markLinkedLoop(id: string, now = Date.now()) {
+    this.db
+      .prepare(
+        "UPDATE member_grants SET linked_loop_at=COALESCE(linked_loop_at,?) WHERE id=?",
+      )
+      .run(now, id);
+    return this.memberGrant(id);
   }
 }
