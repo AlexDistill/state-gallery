@@ -30,10 +30,19 @@ export default defineConfig({
     },
     {
       name: "video-notes",
-      testMatch: ["recording.spec.ts", "pin-decisions.spec.ts"],
+      testMatch: "recording.spec.ts",
       use: { baseURL: "http://localhost:4202" },
     },
+    {
+      name: "pin-decisions",
+      testMatch: "pin-decisions.spec.ts",
+      use: { baseURL: "http://localhost:4203" },
+    },
   ],
-  webServer: [server(4201, ".data/e2e"), server(4202, ".data/e2e-notes")],
+  webServer: [
+    server(4201, ".data/e2e"),
+    server(4202, ".data/e2e-notes"),
+    server(4203, ".data/e2e-decisions"),
+  ],
   reporter: [["list"], ["html", { open: "never" }]],
 });

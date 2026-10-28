@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { randomBytes } from "node:crypto";
 import sharp from "sharp";
 import {
-  BASE,
+  base,
   asMember,
   joinAndOpenStep,
   member,
@@ -19,7 +19,7 @@ const PROPOSALS = [
 async function processedNote(title: string) {
   const { owner, journey, versionId } = await sharedJourney(title);
   const alex = await member(owner, journey, "Alex", true);
-  const up = await fetch(`${BASE}/api/journeys/${journey}/media`, {
+  const up = await fetch(`${base()}/api/journeys/${journey}/media`, {
     method: "PUT",
     headers: {
       Authorization: `Bearer ${alex.token}`,
@@ -78,6 +78,11 @@ test("approving, editing and dropping three pins shows three decisions with the 
     page.getByRole("button", { name: "Request revision" }),
   ).toBeDisabled();
 
+  // What I heard comes first; the per-comment rows wait behind Change it.
+  const heard = page.getByLabel("What I heard");
+  await expect(heard.locator(".heard-title")).toHaveText(PROPOSALS);
+  await expect(page.locator(".pin-row")).toHaveCount(0);
+  await heard.getByRole("button", { name: "Change it" }).click();
   await page.getByRole("button", { name: /Enlarge the title/ }).click();
   await expect(page.getByText("“about enlarge the title”")).toBeVisible();
   await page.getByRole("button", { name: "Approve" }).click();
@@ -161,6 +166,7 @@ test("a stale decision shows the existing one and changes nothing", async ({
     await route.fulfill({ json: stale });
   });
   const amadeo = await joinAndOpenStep(page, owner, journey, "Amadeo", false);
+  await page.getByRole("button", { name: "Change it" }).click();
   await page.getByRole("button", { name: /Enlarge the title/ }).click();
   await expect(page.getByRole("button", { name: "Drop" })).toBeVisible();
 
@@ -203,6 +209,93 @@ test("a stale decision shows the existing one and changes nothing", async ({
   });
 });
 
+test("Yes, do it approves every open comment and leaves a decided one as it is", async ({
+  page,
+}) => {
+  const { owner, journey, alex, pins } = await processedNote("Yes do it");
+  // Alex drops the third comment before anyone opens the note.
+  const dropped = await asMember(
+    alex.token,
+    `/journeys/${journey}/pins/${pins[2].id}/decisions`,
+    { expected: null, status: "dropped" },
+  );
+  expect(dropped.status).toBe(201);
+  const amadeo = await joinAndOpenStep(page, owner, journey, "Amadeo", false);
+  await expect(
+    page.getByRole("heading", { name: "Comments · 1" }),
+  ).toBeVisible();
+  const heard = page.getByLabel("What I heard");
+  await expect(heard).toContainText("Three points on the home screen");
+  await expect(heard.locator(".heard-title")).toHaveText(PROPOSALS);
+  if (process.env.GALLERY_SCREENSHOT)
+    await page
+      .locator(".discussion")
+      .screenshot({ path: process.env.GALLERY_SCREENSHOT });
+
+  await heard.getByRole("button", { name: "Yes, do it" }).click();
+  // Nothing is left open, so the rows show and Yes, do it has nothing more to do.
+  await expect(page.locator(".pin-status")).toHaveText([
+    "Approved",
+    "Approved",
+    "Dropped",
+  ]);
+  await expect(
+    heard.getByRole("button", { name: "Yes, do it" }),
+  ).toBeDisabled();
+  await expect(heard.getByRole("button", { name: "Change it" })).toHaveCount(0);
+  await expect(heard.getByRole("status")).toHaveCount(0);
+
+  const { body } = await asMember(amadeo.token, `/journeys/${journey}/notes`);
+  expect(
+    body.notes[0].pins.map((p: any) => [
+      p.decision.status,
+      p.decision.memberName,
+      p.decision.id === dropped.body.decision.id || null,
+    ]),
+  ).toEqual([
+    ["approved", "Amadeo", null],
+    ["approved", "Amadeo", null],
+    ["dropped", "Alex", true],
+  ]);
+});
+
+test("Yes, do it keeps going past a comment someone else decided first", async ({
+  page,
+}) => {
+  const { owner, journey, alex, pins } = await processedNote("Yes do it race");
+  // Amadeo's screen keeps the notes as they were when it opened.
+  let stale: unknown = null;
+  await page.route(/\/api\/journeys\/[^/]+\/notes(\?.*)?$/, async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    if (!stale) stale = await (await route.fetch()).json();
+    await route.fulfill({ json: stale });
+  });
+  const amadeo = await joinAndOpenStep(page, owner, journey, "Amadeo", false);
+  await expect(page.getByLabel("What I heard")).toBeVisible();
+  const changed = await asMember(
+    alex.token,
+    `/journeys/${journey}/pins/${pins[1].id}/decisions`,
+    { expected: null, status: "changed", text: "Make the button teal" },
+  );
+  expect(changed.status).toBe(201);
+
+  await page.getByRole("button", { name: "Yes, do it" }).click();
+  await expect(page.getByLabel("What I heard").getByRole("status")).toHaveText(
+    "Someone else had already decided 1 comment, so it was left as it is.",
+  );
+  const { body } = await asMember(amadeo.token, `/journeys/${journey}/notes`);
+  expect(
+    body.notes[0].pins.map((p: any) => [
+      p.decision.status,
+      p.decision.memberName,
+    ]),
+  ).toEqual([
+    ["approved", "Amadeo"],
+    ["changed", "Alex"],
+    ["approved", "Amadeo"],
+  ]);
+});
+
 test("a round that became a version lists what came out, and Later shows readable titles", async ({
   page,
 }) => {
@@ -213,7 +306,7 @@ test("a round that became a version lists what came out, and Later shows readabl
   })
     .png()
     .toBuffer();
-  const up = await fetch(`${BASE}/api/journeys/${journey}/media`, {
+  const up = await fetch(`${base()}/api/journeys/${journey}/media`, {
     method: "PUT",
     headers: {
       Authorization: `Bearer ${alex.token}`,

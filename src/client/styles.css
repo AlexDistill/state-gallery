@@ -808,6 +808,48 @@ label.check {
 .video-note p {
   margin: 6px 0 10px;
 }
+.heard {
+  background: white;
+  border: 1px solid #dce2d4;
+  border-radius: 9px;
+  padding: 12px 14px;
+  margin: 8px 0 10px;
+}
+.heard-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.heard-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-weight: 500;
+  color: #24361e;
+}
+.heard-title {
+  flex: 1;
+  min-width: 0;
+  padding-top: 2px;
+  overflow-wrap: anywhere;
+}
+.heard-list li.dropped .heard-title {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.heard-status {
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7565;
+  padding-top: 3px;
+}
+
+.heard .heard-message {
+  margin: 10px 0 0;
+}
 .waiting {
   color: #836332;
 }

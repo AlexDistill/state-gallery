@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   NotesPanel,
   hasUnsentDecisions,
+  openPins,
   pinTitle,
   time,
 } from "../src/client/PinDecisions.js";
@@ -120,6 +121,54 @@ test("a processed note can be played back; an unprocessed one cannot", () => {
     render([note([pin()], { status: "unprocessed" })]),
     /note-player/,
   );
+});
+
+test("What I heard lists a processed note's comments and keeps open rows behind Change it", () => {
+  const html = render([
+    note([
+      pin(),
+      pin({ id: "p2", proposal: { quote: "q", proposal: "Warm it up" } }),
+    ]),
+  ]);
+  assert.match(html, /<h3>Comments · 1<\/h3>/);
+  assert.match(html, /aria-label="What I heard"/);
+  assert.deepEqual(
+    [...html.matchAll(/class="heard-title">([^<]+)</g)].map((m) => m[1]),
+    ["Enlarge the title", "Warm it up"],
+  );
+  assert.match(html, />Yes, do it</);
+  assert.match(html, /aria-expanded="false">Change it</);
+  assert.doesNotMatch(html, /pin-row/);
+});
+
+test("with nothing open, Yes, do it is disabled and the rows show", () => {
+  const html = render([note([pin({ decision: decision("approved", "x") })])]);
+  assert.match(html, /<button disabled="">Yes, do it</);
+  assert.doesNotMatch(html, /Change it/);
+  assert.match(html, /pin-row/);
+});
+
+test("an unprocessed note waits for the recorder's Mac and shows its rows", () => {
+  const html = render([
+    note([pin({ proposal: null })], { status: "unprocessed", summary: null }),
+  ]);
+  assert.match(html, /Waiting for Alex&#x27;s Mac/);
+  assert.doesNotMatch(html, /What I heard/);
+  assert.match(html, /pin-row/);
+});
+
+test("open comments are undecided, outside a request and have a proposal", () => {
+  const pins = [
+    pin(),
+    pin({ id: "p2", decision: decision("dropped", null) }),
+    pin({ id: "p3", requestId: "r1" }),
+    pin({ id: "p4", proposal: null }),
+  ];
+  assert.deepEqual(
+    openPins(note(pins)).map((p) => p.id),
+    ["p1"],
+  );
+  assert.deepEqual(openPins(note(pins, { status: "unprocessed" })), []);
 });
 
 test("the steps line leaves out unknown capture coverage", () => {
