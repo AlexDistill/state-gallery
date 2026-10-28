@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { Store } from "../src/server/domain.js";
 import { createServer } from "../src/server/http.js";
 import { recordTurn, shelve, type Actor } from "../src/server/notes.js";
-import { TurnsView } from "../src/client/Turns.js";
+import { TurnsView, shelfTitle } from "../src/client/Turns.js";
 
 const image = {
   bytes: Buffer.from("img"),
@@ -146,7 +146,7 @@ test("a not-a-version turn shows its reason", async () => {
 
 test("the shelf lists items with reasons, newest first", async () => {
   const { html } = await fixture();
-  const order = ["dark-mode", "carousel", "old-hero"].map((s) =>
+  const order = ["Dark mode", "Carousel", "Old hero"].map((s) =>
     html.indexOf(`<strong>${s}</strong>`),
   );
   assert.ok(order.every((i) => i >= 0));
@@ -156,4 +156,23 @@ test("the shelf lists items with reasons, newest first", async () => {
   );
   assert.match(html, /Later, after launch/);
   assert.match(html, /Nobody swipes/);
+});
+
+test("a round that became a version lists what came out", async () => {
+  const { html } = await fixture();
+  assert.match(
+    html,
+    /Came out<\/span><ul><li class="turn-output">Home screen<\/li><\/ul>/,
+  );
+});
+
+test("an item saved for later gets a readable title", () => {
+  const versions = [{ id: "v1", steps: [{ id: "home", title: "Home" }] }];
+  assert.equal(shelfTitle("home", versions), "Home");
+  assert.equal(
+    shelfTitle("testimonials-strip", versions),
+    "Testimonials strip",
+  );
+  assert.equal(shelfTitle("hero_banner", versions), "Hero banner");
+  assert.equal(shelfTitle("hero.png", versions), "hero.png");
 });

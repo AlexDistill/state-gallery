@@ -6,9 +6,28 @@ const day = (at: number) =>
   new Date(at).toLocaleString([], {
     month: "short",
     day: "numeric",
-    hour: "2-digit",
+    hour: "numeric",
     minute: "2-digit",
   });
+
+/**
+ * A readable title for an item saved for later. Pushes carry only an id, so use a version
+ * step's title when the id names one, keep a file name as it is, and otherwise turn
+ * "testimonials-strip" into "Testimonials strip".
+ */
+export function shelfTitle(
+  itemId: string,
+  versions: { steps?: { id: string; title: string }[] }[],
+) {
+  for (const v of [...versions].reverse()) {
+    const step = v.steps?.find((s) => s.id === itemId);
+    if (step) return step.title;
+  }
+  const name = itemId.split(/[/:]/).pop() || itemId;
+  if (/\.[a-z0-9]{1,5}$/i.test(name)) return name;
+  const words = name.replace(/[-_.]+/g, " ").trim();
+  return words ? words[0].toUpperCase() + words.slice(1) : itemId;
+}
 
 export function TurnsView({
   turns,
@@ -18,7 +37,7 @@ export function TurnsView({
 }: {
   turns: Turn[];
   shelf: ShelfItem[];
-  versions: Pick<Version, "id">[];
+  versions: (Pick<Version, "id"> & Partial<Pick<Version, "steps">>)[];
   notes: Pick<VideoNote, "id" | "recorderName" | "summary">[];
 }) {
   const versionNumber = (id: string) =>
@@ -72,7 +91,7 @@ export function TurnsView({
                     <span className="eyebrow">Came out</span>
                     {other.length || images.length ? (
                       <ul>
-                        {other.map((x, k) => (
+                        {(t.versionId ? t.outputs : other).map((x, k) => (
                           <li key={k} className="turn-output">
                             {x.title}
                           </li>
@@ -121,7 +140,7 @@ export function TurnsView({
         <ul className="shelf-list">
           {shelved.map((s) => (
             <li className="shelf-item" key={s.id}>
-              <strong>{s.itemId}</strong>
+              <strong>{shelfTitle(s.itemId, versions)}</strong>
               <p>{s.reason || "No reason given"}</p>
               <span className="small">
                 {s.memberName} · {day(s.at)}

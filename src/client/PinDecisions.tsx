@@ -3,12 +3,18 @@ import { api, ApiError } from "./api.js";
 import type { PinDecision, Pin, VideoNote } from "../shared/model.js";
 
 export const time = (at: number) =>
-  new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 const VERB = { approved: "Approved", changed: "Changed", dropped: "Dropped" };
 
-/** "Amadeo already approved this at 14:02" — the decision that stands after a refused one. */
-export const conflictLine = (d: PinDecision) =>
-  `${d.memberName} already ${d.status} this at ${time(d.at)}`;
+/** A comment's row title: the changed text once decided as changed, else the proposal. */
+export const pinTitle = (pin: Pin, n: number) =>
+  (pin.decision?.status === "changed" && pin.decision.text) ||
+  pin.proposal?.proposal ||
+  `Comment ${n}`;
+
+/** True when some decided comment is not yet in a revision request, so a request has something to send. */
+export const hasUnsentDecisions = (notes: Pick<VideoNote, "pins">[]) =>
+  notes.some((n) => n.pins.some((p) => p.decision && !p.requestId));
 
 /** The pins of a step's notes, numbered in the order they are listed and drawn on the image. */
 export function stepPins(notes: VideoNote[]) {
@@ -48,6 +54,9 @@ export function NotesPanel({
             </p>
           )}
           {note.summary && <p>{note.summary}</p>}
+          {note.status === "processed" && note.mediaId && (
+            <NotePlayer journeyId={journeyId} note={note} />
+          )}
           {note.pins.map((pin) => {
             const n = numbered.findIndex((x) => x.pin.id === pin.id) + 1;
             const open = selected === pin.id;
@@ -60,7 +69,10 @@ export function NotesPanel({
                 >
                   <span className="pin-number">{n}</span>
                   <span className="pin-title">
-                    {pin.proposal?.proposal ?? `Comment ${n}`}
+                    {pinTitle(pin, n)}
+                    {pin.requestId && (
+                      <span className="pin-request">In revision request</span>
+                    )}
                   </span>
                   <span className="pin-status">
                     {pin.decision
@@ -88,6 +100,35 @@ export function NotesPanel({
   );
 }
 
+/** Plays back a processed note's recording; its media is readable by every member once processed. */
+function NotePlayer({
+  journeyId,
+  note,
+}: {
+  journeyId: string;
+  note: VideoNote;
+}) {
+  const src = `/api/journeys/${encodeURIComponent(journeyId)}/media/${encodeURIComponent(note.mediaId!)}`;
+  const label = `Play ${note.recorderName}'s ${note.medium === "video" ? "video" : "voice"} note`;
+  return note.medium === "video" ? (
+    <video
+      className="note-player"
+      controls
+      preload="metadata"
+      src={src}
+      aria-label={label}
+    />
+  ) : (
+    <audio
+      className="note-player"
+      controls
+      preload="metadata"
+      src={src}
+      aria-label={label}
+    />
+  );
+}
+
 function PinDetail({
   journeyId,
   note,
@@ -105,7 +146,10 @@ function PinDetail({
     [editing, setEditing] = useState(false),
     [text, setText] = useState(pin.proposal?.proposal ?? ""),
     [busy, setBusy] = useState(false),
-    [conflict, setConflict] = useState<PinDecision | null>(null),
+    [conflict, setConflict] = useState<{
+      current: PinDecision;
+      message: string;
+    } | null>(null),
     [error, setError] = useState("");
   const loadHistory = () =>
     api(`/journeys/${journeyId}/pins/${pin.id}/history`)
@@ -115,8 +159,8 @@ function PinDetail({
     loadHistory();
   }, [pin.id, pin.decision?.id]);
   // A refused decision shows the one that stands until a refresh brings it in.
-  const current =
-    conflict && conflict.id !== pin.decision?.id ? conflict : pin.decision;
+  const refused = conflict && conflict.current.id !== pin.decision?.id;
+  const current = refused ? conflict.current : pin.decision;
   const decide = async (status: PinDecision["status"], change?: string) => {
     setBusy(true);
     setError("");
@@ -131,7 +175,7 @@ function PinDetail({
       await onChanged();
     } catch (e) {
       if (e instanceof ApiError && e.status === 409 && e.data?.current)
-        setConflict(e.data.current);
+        setConflict({ current: e.data.current, message: e.message });
       else setError((e as Error).message);
     } finally {
       setBusy(false);
@@ -152,9 +196,9 @@ function PinDetail({
       ) : processed ? (
         <p className="small">No change was proposed for this comment.</p>
       ) : null}
-      {conflict && conflict.id !== pin.decision?.id && (
+      {refused && (
         <p className="error" role="alert">
-          {conflictLine(conflict)}
+          {conflict.message}
         </p>
       )}
       {current && (
@@ -162,7 +206,7 @@ function PinDetail({
           <strong>
             {VERB[current.status]} by {current.memberName}
           </strong>{" "}
-          at {time(current.at)}
+          at <span className="nowrap">{time(current.at)}</span>
           {current.text && current.status === "changed" && (
             <>
               <br />
@@ -176,7 +220,8 @@ function PinDetail({
           In a revision request; this comment can't be decided again.
         </p>
       ) : (
-        processed && (
+        processed &&
+        !refused && (
           <>
             {editing ? (
               <form

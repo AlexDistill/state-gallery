@@ -41,8 +41,16 @@ test("recording 3 seconds of voice with two clicks uploads one audio note with t
     page.getByRole("button", { name: /^Comment 2 at / }),
   ).toBeVisible();
   await expect(page.locator("audio")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Listen back" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Watch it back" }),
+  ).toHaveCount(0);
   await page.getByRole("button", { name: "Upload", exact: true }).click();
   await expect(page.getByText("Waiting for Alex's Loop").first()).toBeVisible();
+  // Not processed yet: the notes panel has no player for it.
+  await expect(page.locator(".note-player")).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Video note comment 2 point" }),
   ).toBeVisible();
@@ -98,7 +106,9 @@ test("a member with no linked Loop sees no Record control", async ({
 }) => {
   const { owner, journey } = await sharedJourney("Not linked yet");
   await joinAndOpenStep(page, owner, journey, "Sam", false);
-  await expect(page.getByText("Link Loop to record notes here")).toBeVisible();
+  await expect(page.locator(".recorder-hint")).toHaveText(
+    "To record notes here, link your Loop: run loop link with your member token.",
+  );
   await expect(page.getByRole("button", { name: "Record note" })).toHaveCount(
     0,
   );
