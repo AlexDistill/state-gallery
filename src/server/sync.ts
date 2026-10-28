@@ -470,6 +470,57 @@ function withoutRetracted(
 }
 
 type PushTurn = z.infer<typeof pushSchema>["turns"][number];
+type PushStep = NonNullable<PushTurn["version"]>["steps"][number];
+
+/**
+ * A round changes some screens, not the journey: the new version is the
+ * parent's steps in order, a pushed step with a parent step's id replacing
+ * its image (keeping the parent's title, purpose and transition), and pushed
+ * steps with new ids after them. Kept steps reuse the parent's stored image.
+ */
+function withParentSteps(
+  store: Store,
+  journey: string,
+  parent: Journey["versions"][number] | undefined,
+  pushed: PushStep[],
+  assets: Record<
+    string,
+    { bytes: Buffer; mime: string; width: number; height: number }
+  >,
+): PushStep[] {
+  if (!parent) return pushed;
+  const byId = new Map(pushed.map((s) => [String(s.id), s]));
+  const kept = parent.steps.map((p) => {
+    const { assetId, width, height, ...step } = p;
+    const s = byId.get(p.id);
+    if (s) {
+      byId.delete(p.id);
+      return {
+        ...s,
+        title: step.title,
+        purpose: step.purpose,
+        transition: step.transition,
+      };
+    }
+    if (!assetId) return step;
+    const a = store.asset(assetId, journey) as {
+      bytes: Uint8Array;
+      mime: string;
+      width: number;
+      height: number;
+    };
+    const key = `parent:${assetId}`;
+    assets[key] = {
+      bytes: Buffer.from(a.bytes),
+      mime: a.mime,
+      width: a.width,
+      height: a.height,
+    };
+    return { ...step, image: key };
+  });
+  return [...kept, ...byId.values()];
+}
+
 function applyTurn(
   store: Store,
   journey: string,
@@ -521,6 +572,13 @@ function applyTurn(
         journey,
         {
           ...t.version,
+          steps: withParentSteps(
+            store,
+            journey,
+            j.versions.find((x) => x.id === t.parentVersionId),
+            t.version.steps,
+            assets,
+          ),
           schemaVersion: 1,
           parentId: t.parentVersionId ?? undefined,
           requestId: t.requestId,

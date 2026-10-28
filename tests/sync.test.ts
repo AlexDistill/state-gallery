@@ -951,3 +951,90 @@ test(
     assert.equal(j.requests.find((x) => x.id === q.body.id)!.successorId, v.id);
   }),
 );
+
+test(
+  "a round that changes one screen keeps the parent's other screens in the new version",
+  run(async (t) => {
+    const two = t.store.submit(
+      t.j.id,
+      {
+        schemaVersion: 1,
+        parentId: t.store.get(t.j.id).currentId!,
+        steps: [
+          { ...step("home.png"), purpose: "Say hello.", transition: "Go on" },
+          {
+            ...step("about.png"),
+            id: "about",
+            title: "About",
+            kind: "capture",
+          },
+        ],
+      },
+      {
+        "home.png": {
+          bytes: await png("#fff"),
+          mime: "image/png",
+          width: 8,
+          height: 8,
+        },
+        "about.png": {
+          bytes: await png("#00f"),
+          mime: "image/png",
+          width: 8,
+          height: 8,
+        },
+      },
+      "v2-two-screens",
+    );
+    const r = await t.push(t.alex.token, {
+      turns: [
+        {
+          eventId: "ev-one-screen",
+          loopTurnId: "t-one-screen",
+          parentIds: [],
+          parentVersionId: two.id,
+          inputs: [{ title: "Home" }],
+          outputs: [
+            { title: "home-v3.png", kind: "image" },
+            { title: "extra.png", kind: "image" },
+          ],
+          reactionNoteIds: [],
+          version: {
+            title: "Home copy",
+            steps: [
+              {
+                ...step(
+                  await t.upload(t.alex.token, await png("#f00"), "image/png"),
+                ),
+                title: "home-v3.png",
+              },
+              {
+                ...step(
+                  await t.upload(t.alex.token, await png("#0f0"), "image/png"),
+                ),
+                id: "extra",
+                title: "extra.png",
+              },
+            ],
+          },
+        },
+      ],
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const j = t.store.get(t.j.id);
+    const v = j.versions.find((x) => x.id === r.body.results[0].versionId)!;
+    assert.deepEqual(
+      v.steps.map((s) => s.id),
+      ["home", "about", "extra"],
+    );
+    const [home, about] = v.steps;
+    const [oldHome, oldAbout] = two.steps;
+    assert.notEqual(home.assetId, oldHome.assetId);
+    assert.equal(home.title, "Home");
+    assert.equal(home.purpose, "Say hello.");
+    assert.equal(home.transition, "Go on");
+    assert.equal(about.assetId, oldAbout.assetId);
+    assert.equal(about.title, "About");
+    assert.equal(about.kind, "capture");
+  }),
+);
