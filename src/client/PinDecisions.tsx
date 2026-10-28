@@ -21,6 +21,33 @@ export function stepPins(notes: VideoNote[]) {
   return notes.flatMap((note) => note.pins.map((pin) => ({ note, pin })));
 }
 
+/** Comments in a note that "Yes, do it" can approve: processed, undecided, outside a request, with a proposal. */
+export const openPins = (note: VideoNote) =>
+  note.status === "processed"
+    ? note.pins.filter((p) => !p.decision && !p.requestId && p.proposal)
+    : [];
+
+/**
+ * Approves each open comment with the same call as its Approve button, one at a time.
+ * A comment someone else decided first is refused by the server and left as it is.
+ */
+export async function approveAll(journeyId: string, pins: Pin[]) {
+  let refused = 0;
+  let failed = "";
+  for (const pin of pins) {
+    try {
+      await api(`/journeys/${journeyId}/pins/${pin.id}/decisions`, {
+        expected: null,
+        status: "approved",
+      });
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) refused++;
+      else failed ||= (e as Error).message;
+    }
+  }
+  return { refused, failed };
+}
+
 export function NotesPanel({
   journeyId,
   notes,
@@ -38,65 +65,173 @@ export function NotesPanel({
   const numbered = stepPins(notes);
   return (
     <section className="video-notes">
-      <h3>Video notes · {notes.length}</h3>
+      <h3>Comments · {notes.length}</h3>
       {notes.map((note) => (
-        <article className="video-note" key={note.id}>
-          <div className="comment-meta">
-            <strong>{note.recorderName}</strong>
-            <span>
-              {note.medium === "video" ? "Screen recording" : "Voice note"} ·{" "}
-              {time(note.createdAt)}
-            </span>
-          </div>
-          {note.status === "unprocessed" && (
-            <p className="small waiting">
-              Waiting for {note.recorderName}'s Loop
-            </p>
-          )}
-          {note.summary && <p>{note.summary}</p>}
-          {note.status === "processed" && note.mediaId && (
-            <NotePlayer journeyId={journeyId} note={note} />
-          )}
-          {note.pins.map((pin) => {
-            const n = numbered.findIndex((x) => x.pin.id === pin.id) + 1;
-            const open = selected === pin.id;
-            return (
-              <div key={pin.id}>
-                <button
-                  className={`pin-row ${open ? "selected" : "ghost"}`}
-                  aria-expanded={open}
-                  onClick={() => onSelect(open ? null : pin.id)}
-                >
-                  <span className="pin-number">{n}</span>
-                  <span className="pin-title">
-                    {pinTitle(pin, n)}
-                    {pin.requestId && (
-                      <span className="pin-request">In revision request</span>
-                    )}
-                  </span>
-                  <span className="pin-status">
-                    {pin.decision
-                      ? VERB[pin.decision.status]
-                      : note.status === "unprocessed"
-                        ? "Waiting"
-                        : "Open"}
-                  </span>
-                </button>
-                {open && (
-                  <PinDetail
-                    journeyId={journeyId}
-                    note={note}
-                    pin={pin}
-                    number={n}
-                    onChanged={onChanged}
-                  />
-                )}
-              </div>
-            );
-          })}
-        </article>
+        <NoteItem
+          key={note.id}
+          journeyId={journeyId}
+          note={note}
+          numbered={numbered}
+          selected={selected}
+          onSelect={onSelect}
+          onChanged={onChanged}
+        />
       ))}
     </section>
+  );
+}
+
+function NoteItem({
+  journeyId,
+  note,
+  numbered,
+  selected,
+  onSelect,
+  onChanged,
+}: {
+  journeyId: string;
+  note: VideoNote;
+  numbered: ReturnType<typeof stepPins>;
+  selected: string | null;
+  onSelect: (pinId: string | null) => void;
+  onChanged: () => Promise<void>;
+}) {
+  const [expanded, setExpanded] = useState(false),
+    [busy, setBusy] = useState(false),
+    [message, setMessage] = useState("");
+  const number = (pin: Pin) =>
+    numbered.findIndex((x) => x.pin.id === pin.id) + 1;
+  const open = openPins(note);
+  const heard = note.status === "processed" && !!note.summary;
+  // With comments still open, What I heard comes first and the rows wait behind Change it.
+  const collapsible = heard && open.length > 0;
+  const showRows =
+    !collapsible || expanded || note.pins.some((p) => p.id === selected);
+  const yes = async () => {
+    setBusy(true);
+    setMessage("");
+    try {
+      const { refused, failed } = await approveAll(journeyId, open);
+      if (refused)
+        setMessage(
+          refused === 1
+            ? "Someone else had already decided 1 comment, so it was left as it is."
+            : `Someone else had already decided ${refused} comments, so they were left as they are.`,
+        );
+      else if (failed) setMessage(failed);
+      await onChanged();
+    } catch (e) {
+      setMessage((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <article className="video-note">
+      <div className="comment-meta">
+        <strong>{note.recorderName}</strong>
+        <span>
+          {note.medium === "video" ? "Screen recording" : "Voice note"} ·{" "}
+          {time(note.createdAt)}
+        </span>
+      </div>
+      {note.status === "unprocessed" && (
+        <p className="small waiting">Waiting for {note.recorderName}'s Mac</p>
+      )}
+      {heard ? (
+        <div className="heard" aria-label="What I heard">
+          <span className="eyebrow">What I heard</span>
+          <p>{note.summary}</p>
+          {note.pins.length > 0 && (
+            <ol className="heard-list">
+              {note.pins.map((pin) => (
+                <li
+                  key={pin.id}
+                  className={
+                    pin.decision?.status === "dropped" ? "dropped" : undefined
+                  }
+                >
+                  <span className="pin-number">{number(pin)}</span>
+                  <span className="heard-title">
+                    {pinTitle(pin, number(pin))}
+                  </span>
+                  {pin.decision && (
+                    <span className="heard-status">
+                      {VERB[pin.decision.status]}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
+          <div className="button-row">
+            <button disabled={busy || open.length === 0} onClick={yes}>
+              {busy ? "Approving…" : "Yes, do it"}
+            </button>
+            {collapsible && (
+              <button
+                className="ghost"
+                aria-expanded={showRows}
+                onClick={() => {
+                  if (showRows) onSelect(null);
+                  setExpanded(!showRows);
+                }}
+              >
+                Change it
+              </button>
+            )}
+          </div>
+          {message && (
+            <p className="small heard-message" role="status">
+              {message}
+            </p>
+          )}
+        </div>
+      ) : (
+        note.summary && <p>{note.summary}</p>
+      )}
+      {note.status === "processed" && note.mediaId && (
+        <NotePlayer journeyId={journeyId} note={note} />
+      )}
+      {showRows &&
+        note.pins.map((pin) => {
+          const n = number(pin);
+          const open = selected === pin.id;
+          return (
+            <div key={pin.id}>
+              <button
+                className={`pin-row ${open ? "selected" : "ghost"}`}
+                aria-expanded={open}
+                onClick={() => onSelect(open ? null : pin.id)}
+              >
+                <span className="pin-number">{n}</span>
+                <span className="pin-title">
+                  {pinTitle(pin, n)}
+                  {pin.requestId && (
+                    <span className="pin-request">In revision request</span>
+                  )}
+                </span>
+                <span className="pin-status">
+                  {pin.decision
+                    ? VERB[pin.decision.status]
+                    : note.status === "unprocessed"
+                      ? "Waiting"
+                      : "Open"}
+                </span>
+              </button>
+              {open && (
+                <PinDetail
+                  journeyId={journeyId}
+                  note={note}
+                  pin={pin}
+                  number={n}
+                  onChanged={onChanged}
+                />
+              )}
+            </div>
+          );
+        })}
+    </article>
   );
 }
 

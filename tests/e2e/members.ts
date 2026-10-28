@@ -1,14 +1,21 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import sharp from "sharp";
 import { Client } from "../../src/cli/client.js";
 
-export const BASE = "http://localhost:4202";
+/** The running test's server: each video-note project has its own, so sign-in limits stay per project. */
+export const base = () => test.info().project.use.baseURL!;
 
-// One owner login for the whole run: sign-in routes allow 15 attempts a minute per address.
-const owner = new Client(BASE, undefined, "e2e-local-secret");
+// One owner login per server: sign-in routes allow 15 attempts a minute per address.
+const owners = new Map<string, Client>();
+const ownerClient = () => {
+  if (!owners.has(base()))
+    owners.set(base(), new Client(base(), undefined, "e2e-local-secret"));
+  return owners.get(base())!;
+};
 
 /** A journey with one version of one 600 × 400 step, created by the owner. */
 export async function sharedJourney(title: string) {
+  const owner = ownerClient();
   const j = await owner.request("/journeys", { title });
   const png = await sharp({
     create: { width: 600, height: 400, channels: 3, background: "#d7e2ca" },
@@ -41,7 +48,7 @@ export async function asMember(
   body?: unknown,
   method = body === undefined ? "GET" : "POST",
 ) {
-  const r = await fetch(`${BASE}/api${path}`, {
+  const r = await fetch(`${base()}/api${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -79,9 +86,9 @@ export async function member(
   link: boolean,
 ) {
   const g = await owner.inviteMember(journey, name);
-  const r = await fetch(`${BASE}/api/members/redeem`, {
+  const r = await fetch(`${base()}/api/members/redeem`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Origin: BASE },
+    headers: { "Content-Type": "application/json", Origin: base() },
     body: JSON.stringify({ invite: g.invite }),
   });
   expect(r.status).toBe(200);

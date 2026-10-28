@@ -257,7 +257,7 @@ export function useRecorder() {
     } catch (e) {
       setPhase("preview");
       setError(
-        `${(e as Error).message} Your recording is still here; try Upload again.`,
+        `${(e as Error).message} Your recording is still here; try Send again.`,
       );
       return false;
     }
@@ -348,7 +348,7 @@ export function RecorderPanel({
           <p className="small">Recordings here go to the shared project.</p>
           <div className="button-row">
             <button disabled={rec.phase === "starting"} onClick={rec.start}>
-              {rec.phase === "starting" ? "Starting…" : "Record note"}
+              {rec.phase === "starting" ? "Starting…" : "Talk over this"}
             </button>
             {canCaptureScreen && (
               <label className="check">
@@ -415,8 +415,8 @@ export function RecorderPanel({
           </div>
           <p className="small">
             {clock(rec.preview.durationMs)} · {rec.pins.length}{" "}
-            {rec.pins.length === 1 ? "comment" : "comments"}. Uploading sends it
-            to the shared project; your Loop processes it next.
+            {rec.pins.length === 1 ? "comment" : "comments"}. Send puts it in
+            the shared project; your Mac writes it up next.
           </p>
           <div className="button-row">
             <button
@@ -426,7 +426,7 @@ export function RecorderPanel({
                   onUploaded();
               }}
             >
-              {rec.phase === "uploading" ? "Uploading…" : "Upload"}
+              {rec.phase === "uploading" ? "Sending…" : "Send"}
             </button>
             <button
               className="ghost"

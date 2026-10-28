@@ -1,13 +1,13 @@
 import { test, expect, type Page } from "@playwright/test";
 import sharp from "sharp";
-import { BASE, asMember, joinAndOpenStep, sharedJourney } from "./members.js";
+import { base, asMember, joinAndOpenStep, sharedJourney } from "./members.js";
 
 /** Records for about three seconds, clicking the image at each fraction given. */
 async function record(page: Page, clicks: [number, number][]) {
   await expect(
     page.getByText("Recordings here go to the shared project."),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Record note" }).click();
+  await page.getByRole("button", { name: "Talk over this" }).click();
   await expect(page.getByText(/Recording ·/)).toBeVisible();
   const img = page.locator(".annotated img");
   await img.scrollIntoViewIfNeeded();
@@ -47,8 +47,8 @@ test("recording 3 seconds of voice with two clicks uploads one audio note with t
   await expect(
     page.getByRole("heading", { name: "Watch it back" }),
   ).toHaveCount(0);
-  await page.getByRole("button", { name: "Upload", exact: true }).click();
-  await expect(page.getByText("Waiting for Alex's Loop").first()).toBeVisible();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByText("Waiting for Alex's Mac").first()).toBeVisible();
   // Not processed yet: the notes panel has no player for it.
   await expect(page.locator(".note-player")).toHaveCount(0);
   await expect(
@@ -76,7 +76,7 @@ test("recording 3 seconds of voice with two clicks uploads one audio note with t
   expect(second.atMs).toBeGreaterThan(first.atMs);
   expect(note.files.map((f: any) => f.name)).toContain("pointer");
   const media = await fetch(
-    `${BASE}/api/journeys/${journey}/media/${note.mediaId}`,
+    `${base()}/api/journeys/${journey}/media/${note.mediaId}`,
     { headers: { Authorization: `Bearer ${alex.token}` } },
   );
   expect(media.status).toBe(200);
@@ -95,7 +95,9 @@ test("Discard uploads nothing", async ({ page }) => {
     page.getByRole("button", { name: /^Comment 1 at / }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Discard" }).click();
-  await expect(page.getByRole("button", { name: "Record note" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Talk over this" }),
+  ).toBeVisible();
   expect(sent.filter((s) => /\/media|\/notes/.test(s))).toEqual([]);
   const { body } = await asMember(alex.token, `/journeys/${journey}/notes`);
   expect(body.notes).toHaveLength(0);
@@ -109,9 +111,9 @@ test("a member with no linked Loop sees no Record control", async ({
   await expect(page.locator(".recorder-hint")).toHaveText(
     "To record notes here, link your Loop: run loop link with your member token.",
   );
-  await expect(page.getByRole("button", { name: "Record note" })).toHaveCount(
-    0,
-  );
+  await expect(
+    page.getByRole("button", { name: "Talk over this" }),
+  ).toHaveCount(0);
 });
 
 test("on a confidential link the Record control is absent", async ({
@@ -122,9 +124,9 @@ test("on a confidential link the Record control is absent", async ({
     confidential: true,
   });
   await joinAndOpenStep(page, owner, journey, "Alex", true);
-  await expect(page.getByRole("button", { name: "Record note" })).toHaveCount(
-    0,
-  );
+  await expect(
+    page.getByRole("button", { name: "Talk over this" }),
+  ).toHaveCount(0);
   await expect(
     page.getByText("Recordings here go to the shared project."),
   ).toHaveCount(0);
@@ -137,7 +139,7 @@ test("a new version arriving while recording keeps the take on the version it wa
     "New version mid-take",
   );
   const alex = await joinAndOpenStep(page, owner, journey, "Alex", true);
-  await page.getByRole("button", { name: "Record note" }).click();
+  await page.getByRole("button", { name: "Talk over this" }).click();
   await expect(page.getByText(/Recording ·/)).toBeVisible();
   const img = page.locator(".annotated img");
   const box = (await img.boundingBox())!;
@@ -170,8 +172,8 @@ test("a new version arriving while recording keeps the take on the version it wa
   await expect(
     page.getByRole("button", { name: /^Comment 1 at / }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Upload", exact: true }).click();
-  await expect(page.getByText("Waiting for Alex's Loop").first()).toBeVisible();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByText("Waiting for Alex's Mac").first()).toBeVisible();
   const { body } = await asMember(alex.token, `/journeys/${journey}/notes`);
   expect(body.notes).toHaveLength(1);
   expect(body.notes[0].versionId).toBe(versionId);
@@ -193,7 +195,7 @@ test("leaving the screen while the microphone is being opened leaves it closed",
   });
   const { owner, journey } = await sharedJourney("Leave while starting");
   await joinAndOpenStep(page, owner, journey, "Alex", true);
-  await page.getByRole("button", { name: "Record note" }).click();
+  await page.getByRole("button", { name: "Talk over this" }).click();
   await page.getByRole("button", { name: "Rounds" }).click();
   await page.waitForTimeout(2500);
   expect(
